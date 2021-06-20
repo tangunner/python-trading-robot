@@ -10,8 +10,9 @@ from pyrobot.stock_frame import StockFrame
 class Indicators():
 
     """
-    Represents an Indicator Object which can be used
-    to easily add technical indicators to a StockFrame.
+    Represents an Indicator Object which can be used to easily add technical
+    indicators to a StockFrame. (heavily reliant on StockFrame obj; w/o the
+    StockFrame there can be not indicators)
     """    
     
     def __init__(self, price_data_frame: StockFrame) -> None:
@@ -35,11 +36,11 @@ class Indicators():
             >>> indicator_client.price_data_frame
         """
 
-        self._stock_frame: StockFrame = price_data_frame
-        self._price_groups = price_data_frame.symbol_groups
+        self._stock_frame: StockFrame = price_data_frame             # StockFrame obj
+        self._price_groups = self._stock_frame.symbol_groups         # DataFrame Groupby obj, grouped by symbol
         self._current_indicators = {}
         self._indicator_signals = {}
-        self._frame = self._stock_frame.frame
+        self._frame = self._stock_frame.frame                        # DataFrame obj
 
         self._indicators_comp_key = []
         self._indicators_key = []
@@ -193,27 +194,66 @@ class Indicators():
         else:
             return False
 
+    """For all of the indicators, we use the locals func to get all of the args
+    passed into the func, then del self bc we are storing the args for later use
+    and the self arg shouldn't be passed into future func calls. These future
+    func calls will happen whenever we call the refresh method to update the
+    values of the indicators. Finally after storing the func + args we calculate
+    the indicator col for each symbol group"""
+    
     def change_in_price(self, column_name: str = 'change_in_price') -> pd.DataFrame:
-        """Calculates the Change in Price.
+        """Calculates the day-over-day change in close price 
 
         Returns:
         ----
         {pd.DataFrame} -- A data frame with the Change in Price included.
         """
 
-        locals_data = locals()
-        del locals_data['self']
+        locals_data = locals()         # grabs the func args (local vars) that were passed - e.g., self, col_name 
+        del locals_data['self']        # del self bc we only care about the other args passed into an indicator func
         
-        self._current_indicators[column_name] = {}
-        self._current_indicators[column_name]['args'] = locals_data
-        self._current_indicators[column_name]['func'] = self.change_in_price
+        self._current_indicators[column_name] = {}                             # Add a new indicator to our indicators dict
+        self._current_indicators[column_name]['args'] = locals_data            # storing the args to pass to the later func call
+        self._current_indicators[column_name]['func'] = self.change_in_price   # storing the func to call it later using 'args'
 
         self._frame[column_name] = self._price_groups['close'].transform(
-            lambda x: x.diff()
+            lambda x: x.diff()                                                 # finally, calculate the actual change in close price
         )
 
         return self._frame
 
+    def st_decline(self, period: int, column_name: str = 'st_decline') -> pd.DataFrame:
+        """Calculates the % decline the current price represents relative to the
+        max price over the previous period days
+
+        Returns float in range 0 (close price == period max) to 1.00 (close
+        price == 100% decline from period max)
+        """
+
+        locals_data = locals()
+        del locals_data['self']
+
+        self._current_indicators[column_name] = {}
+        self._current_indicators[column_name]['args'] = locals_data
+        self._current_indicators[column_name]['func'] = self.st_decline
+        
+        self._frame['period_max'] = self._price_groups['close'].transform(
+            lambda x: x.rolling(window=period).max()
+        )
+
+        self._frame['st_decline'] = abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
+        
+        # self._frame['st_decline'] = np.where(relative_strength_index == 0, 100, 100 - (100 / (1 + relative_strength_index)))
+
+        self._frame.drop(
+            labels=['period_max'],
+            axis=1,
+            inplace=True
+        )
+
+        return self._frame
+
+    
     def rsi(self, period: int, method: str = 'wilders', column_name: str = 'rsi') -> pd.DataFrame:
         """Calculates the Relative Strength Index (RSI).
 

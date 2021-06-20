@@ -14,7 +14,7 @@ from pyrobot.indicators import Indicators
 
 # Grab configuration values.
 config = ConfigParser()
-config.read('configs/config.ini')
+config.read('config/config.ini')
 
 CLIENT_ID = config.get('main', 'CLIENT_ID')
 REDIRECT_URI = config.get('main', 'REDIRECT_URI')
@@ -26,6 +26,7 @@ trading_robot = PyRobot(
     client_id=CLIENT_ID,
     redirect_uri=REDIRECT_URI,
     credentials_path=CREDENTIALS_PATH,
+    trading_account=ACCOUNT_NUMBER,
     paper_trading=True
 )
 
@@ -172,7 +173,7 @@ indicator_client.rsi(period=14)
 # Add the 200 day simple moving average.
 indicator_client.sma(period=200)
 
-# Add the 200 day simple moving average.
+# Add the 50 day simple moving average.
 indicator_client.sma(period=50)
 
 # Add the 50 day exponentials moving average.
@@ -203,7 +204,7 @@ while True:
     # Add to the Stock Frame.
     stock_frame.add_rows(data=latest_bars)
 
-    # Refresh the Indicators.
+    # Refresh the Indicators so the new row is shown in the data.
     indicator_client.refresh()
 
     print("="*50)

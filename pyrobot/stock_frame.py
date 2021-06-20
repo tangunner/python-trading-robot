@@ -71,7 +71,7 @@ class StockFrame():
         {RollingGroupby} -- A `pandas.core.window.RollingGroupby` object.
         """
 
-        # If we don't a symbols group, then create it.
+        # If we don't have symbol groups, then create it
         if not self._symbol_groups:
             self.symbol_groups
 
