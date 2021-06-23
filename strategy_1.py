@@ -53,137 +53,36 @@ trading_robot = PyRobot(
 # Create a Portfolio
 trading_robot_portfolio = trading_robot.create_portfolio()
 
-# # Define mutliple positions to add.
-# multi_position = [
-#     {
-#         'asset_type': 'equity',
-#         'quantity': 2,
-#         'purchase_price': 4.00,
-#         'symbol': 'TSLA',
-#         'purchase_date': '2020-01-31'
-#     },
-#     {
-#         'asset_type': 'equity',
-#         'quantity': 2,
-#         'purchase_price': 4.00,
-#         'symbol': 'SQ',
-#         'purchase_date': '2020-01-31'
-#     }
-# ]
-
-# # Grab the New positions
-# new_positions = trading_robot.portfolio.add_positions(positions=multi_position)
-# pprint.pprint(new_positions)
-
-# # adding a placeholder SPY position that'll be used to get hist prices
-# trading_robot_portfolio.add_position(
-#     symbol='SPY',
-#     asset_type='equity'
-# )
-
-# # Add a single position
-# trading_robot_portfolio.add_position(
-#     symbol='SPY',
-#     quantity=10,
-#     purchase_price=128,
-#     asset_type='equity',
-#     purchase_date='2006-01-01'
-# )
-
-# # Add another single position
-# trading_robot_portfolio.add_position(
-#     symbol='AAPL',
-#     quantity=10,
-#     purchase_price=10,
-#     asset_type='equity',
-#     purchase_date='2020-04-01'
-# )
-
-# # If the Market is open, print some quotes.
-# if trading_robot.regular_market_open:
-#     pprint.pprint(trading_robot.grab_current_quotes())
-
-# # If the Post Market is Open, do something.
-# elif trading_robot.post_market_open:
-#     pprint.pprint(trading_robot.grab_current_quotes())
-
-# # If the Pre Market is Open, do something.
-# elif trading_robot.pre_market_open:
-#     pprint.pprint(trading_robot.grab_current_quotes())
-
-# # Print the Positions
-# pprint.pprint(trading_robot_portfolio.positions)
-
-# # Grab the current quotes, for all of our positions.
-# current_quotes = trading_robot.grab_current_quotes()
-
-# # Print the Quotes.
-# pprint.pprint(current_quotes)
-
-# # Let's see if our Microsoft Position is profitable.
-# is_msft_porfitable = trading_robot.portfolio.is_profitable(
-#     symbol="MSFT",
-#     current_price=current_quotes['MSFT']['lastPrice']
-# )
-# print("Is Microsoft Profitable: {answer}".format(answer=is_msft_porfitable))
-
-# # Let's get the projected Market Value.
-# portfolio_summary = trading_robot.portfolio.projected_market_value(
-#     current_prices=current_quotes
-# )
-# pprint.pprint(portfolio_summary)
-
-# # Create a new Trade Object.
-# new_trade = trading_robot.create_trade(
-#     trade_id='long_msft',
-#     enter_or_exit='enter',
-#     long_or_short='short',
-#     order_type='lmt',
-#     price=150.00
-# )
-
-# # Make it Good Till Cancel.
-# new_trade.good_till_cancel(cancel_time=datetime.now())
-
-# # Change the session
-# new_trade.modify_session(session='am')
-
-# # Add an Order Leg.
-# new_trade.instrument(
-#     symbol='MSFT',
-#     quantity=2,
-#     asset_type='EQUITY'
-# )
-
-# # Add a Stop Loss Order with the Main Order.
-# new_trade.add_stop_loss(
-#     stop_size=.10,
-#     percentage=False
-# )
-
-# # Print out the order.
-# pprint.pprint(new_trade.order)
-
-# Grab historical prices, first define the start date and end date.
-end_date = datetime.today()
-start_date = datetime(2006,1,1)
-# start_date = end_date - timedelta(days=30)
-
-# Grab the historical prices.
-historical_prices = trading_robot.grab_historical_prices(
-    start=start_date,
-    end=end_date,
-    bar_size=1,
-    bar_type='week',
-    symbols=['SPY']
+trading_robot_accounts = trading_robot.session.get_accounts(
+    account=ACCOUNT_NUMBER
 )
 
+# Cash available in my actual account (not paper trading account)
+account_cash = trading_robot_accounts['securitiesAccount']['currentBalances']['cashAvailableForTrading']
+
+# Adjust the balance if no cash in the account
+account_cash = account_cash if account_cash != 0.0 else 200000.0
+
+# # Grab historical prices, first define the start date and end date.
+# end_date = datetime.now()
+# start_date = end_date - timedelta(days=30)
+
+# # Grab the historical prices.
 # historical_prices = trading_robot.grab_historical_prices(
 #     start=start_date,
 #     end=end_date,
 #     bar_size=1,
-#     bar_type='minute'
+#     bar_type='minute',
+#     symbols=['SPY']
 # )
+
+historical_prices = trading_robot.grab_historical_prices(
+    period_type='year',
+    period=2,
+    frequency=1,
+    frequency_type='daily',
+    symbols=['SPY']
+)
 
 # Convert data to a Data Frame. hist_prices['aggregated'] = a list of dicts,
 # with each dict containing price/vol/high/low/etc. stock data
@@ -193,48 +92,76 @@ stock_frame = trading_robot.create_stock_frame(
 
 # We can also add the stock frame to the Portfolio object.
 trading_robot.portfolio.stock_frame = stock_frame
-
-# Additionally the historical prices can be set as well.
 trading_robot.portfolio.historical_prices = historical_prices
 
-# # Portfolio Variance
-# pprint.pprint(trading_robot.portfolio.portfolio_metrics())
-
-# Create an indicator Object.
+# Create an indicator object and add an indicator
 indicator_client = Indicators(price_data_frame=stock_frame)
+frame = indicator_client.st_decline(period=30)
 
-indicator_client.st_decline(period=30)
+# # display the data
+# pd.set_option('display.max_rows', indicator_client._frame.shape[0]+1)
+# print(frame)
 
 indicator_client.set_indicator_signal(
-    indicator='period_max',
+    indicator='st_decline_10',
+    buy=0.9,
+    sell=1.01,
+    condition_buy=operator.le,
+    condition_sell=operator.ge,
+    buy_max=0.85,
+    condition_buy_max=operator.le
+)
+
+indicator_client.set_indicator_signal(
+    indicator='st_decline_20',
+    buy=0.8,
+    sell=1.01,
+    condition_buy=operator.le,
+    condition_sell=operator.ge,
+    buy_max=0.75,
+    condition_buy_max=operator.le
+)
+
+indicator_client.set_indicator_signal(
+    indicator='st_decline_30',
     buy=0.7,
     sell=1.01,
     condition_buy=operator.le,
-    condition_sell=operator.ge
+    condition_sell=operator.ge,
+    buy_max=0.65,
+    condition_buy_max=operator.le
 )
 
+indicator_client.set_indicator_signal(
+    indicator='st_decline_40',
+    buy=0.6,
+    sell=1.01,
+    condition_buy=operator.le,
+    condition_sell=operator.ge,
+    buy_max=0.55,
+    condition_buy_max=operator.le
+)
 
+indicator_client.set_indicator_signal(
+    indicator='st_decline_50',
+    buy=0.5,
+    sell=1.01,
+    condition_buy=operator.le,
+    condition_sell=operator.ge,
+    buy_max=0.45,
+    condition_buy_max=operator.le
+)
 
-# # Add the RSI Indicator.
-# indicator_client.rsi(period=14)
+indicator_client.set_indicator_signal(
+    indicator='st_decline_60',
+    buy=0.4,
+    sell=1.01,
+    condition_buy=operator.le,
+    condition_sell=operator.ge,
+    buy_max=0.35,
+    condition_buy_max=operator.le
+)
 
-# # Add the 200 day simple moving average.
-# indicator_client.sma(period=200)
-
-# # Add the 50 day simple moving average.
-# indicator_client.sma(period=50)
-
-# # Add the 50 day exponentials moving average.
-# indicator_client.ema(period=50)
-
-# # Add a signal to check for.
-# indicator_client.set_indicator_signal(
-#     indicator='rsi',
-#     buy=40.0,
-#     sell=20.0,
-#     condition_buy=operator.ge,
-#     condition_sell=operator.le
-# )
 
 # Create a new Trade Object.
 new_trade = trading_robot.create_trade(
@@ -247,19 +174,44 @@ new_trade = trading_robot.create_trade(
 # Add an Order Leg.
 new_trade.instrument(
     symbol='SPY',
-    quantity=10,
+    quantity=1,
     asset_type='EQUITY'
 )
+
+# # Define a trading dictionary.
+# trades_dict = {
+#     'SPY': {
+#         'trade_func': trading_robot.trades['long_spy'],
+#         'trade_id': trading_robot.trades['long_spy'].trade_id
+#     }
+# }
 
 # Define a trading dictionary.
 trades_dict = {
     'SPY': {
-        'trade_func': trading_robot.trades['long_spy'],
-        'trade_id': trading_robot.trades['long_spy'].trade_id
+        'buy': {
+            'trade_func': trading_robot.trades['long_spy'],
+            'trade_id': trading_robot.trades['long_spy'].trade_id
+        },
+        'sell': {
+
+        }
     }
 }
 
-while True:
+try:
+    positions = trading_robot.get_positions(account_number=ACCOUNT_NUMBER)
+except:
+    positions = trading_robot_portfolio.positions
+print(positions)
+
+
+"""Below is for doing live trading. NOTE THIS STILL NEEDS TO INCLUDE
+FUNCTIONALITY TO FLAG WHEN A TRADE HAS BEEN EXECUTED - OTHERWISE IT WILL KEEP
+EXECUTING THE SAME TRADES"""
+
+# Continues checking for indicators as long as the market is open
+while trading_robot.regular_market_open:
 
     # Grab the latest bar.
     latest_bars = trading_robot.get_latest_bar()
@@ -271,7 +223,7 @@ while True:
     indicator_client.refresh()
 
     print("="*50)
-    print("Current StockFrame")
+    print("Current StockFrame:")
     print("-"*50)
     print(stock_frame.symbol_groups.tail())
     print("-"*50)
@@ -279,9 +231,6 @@ while True:
 
     # Check for signals.
     signals = indicator_client.check_signals()
-
-    if not signals['buys'].empty:
-        trades_dict
 
     # Execute Trades.
     trading_robot.execute_signals(

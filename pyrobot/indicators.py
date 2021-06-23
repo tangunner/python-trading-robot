@@ -11,7 +11,7 @@ class Indicators():
 
     """
     Represents an Indicator Object which can be used to easily add technical
-    indicators to a StockFrame. (heavily reliant on StockFrame obj; w/o the
+    indicators to a StockFrame. (entirely reliant on StockFrame obj; w/o the
     StockFrame there can be not indicators)
     """    
     
@@ -62,7 +62,7 @@ class Indicators():
 
         if indicator and indicator in self._indicator_signals:
             return self._indicator_signals[indicator]
-        else:      
+        else:
             return self._indicator_signals
     
     def set_indicator_signal(self, indicator: str, buy: float, sell: float, condition_buy: Any, condition_sell: Any, 
@@ -223,8 +223,8 @@ class Indicators():
         return self._frame
 
     def st_decline(self, period: int, column_name: str = 'st_decline') -> pd.DataFrame:
-        """Calculates the % decline the current price represents relative to the
-        max price over the previous period days
+        """Calculates the % decline the current price represents from the max
+        price over the previous period days
 
         Returns float in range 0 (close price == period max) to 1.00 (close
         price == 100% decline from period max)
@@ -241,15 +241,15 @@ class Indicators():
             lambda x: x.rolling(window=period).max()
         )
 
-        self._frame['st_decline'] = abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
+        self._frame['st_decline'] = 1 - abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
         
-        # self._frame['st_decline'] = np.where(relative_strength_index == 0, 100, 100 - (100 / (1 + relative_strength_index)))
-
-        self._frame.drop(
-            labels=['period_max'],
-            axis=1,
-            inplace=True
-        )
+        
+        
+        # self._frame.drop(
+        #     labels=['period_max'],
+        #     axis=1,
+        #     inplace=True
+        # )
 
         return self._frame
 
@@ -1049,10 +1049,10 @@ class Indicators():
         # Grab all the details of the indicators so far.
         for indicator in self._current_indicators:
             
-            # Grab the function.
+            # Grab the arguments.
             indicator_argument = self._current_indicators[indicator]['args']
 
-            # Grab the arguments.
+            # Grab the function.
             indicator_function = self._current_indicators[indicator]['func']
 
             # Update the function.
@@ -1075,23 +1075,3 @@ class Indicators():
 
         return signals_df
 
-
-# #KST Oscillator  
-# def KST(df, r1, r2, r3, r4, n1, n2, n3, n4):  
-#     M = df['Close'].diff(r1 - 1)  
-#     N = df['Close'].shift(r1 - 1)  
-#     ROC1 = M / N  
-#     M = df['Close'].diff(r2 - 1)  
-#     N = df['Close'].shift(r2 - 1)  
-#     ROC2 = M / N  
-#     M = df['Close'].diff(r3 - 1)  
-#     N = df['Close'].shift(r3 - 1)  
-#     ROC3 = M / N  
-#     M = df['Close'].diff(r4 - 1)  
-#     N = df['Close'].shift(r4 - 1)  
-#     ROC4 = M / N  
-#     KST = pd.Series(pd.rolling_sum(ROC1, n1) + pd.rolling_sum(ROC2, n2) * 2 + pd.rolling_sum(ROC3, n3) * 3 +
-#  pd.rolling_sum(ROC4, n4) * 4, name = 'KST_' + str(r1) + '_' + str(r2) + '_' + str(r3) + '_' + str(r4) + '_' +
-#  str(n1) + '_' + str(n2) + '_' + str(n3) + '_' + str(n4))  
-#     df = df.join(KST)  
-#     return df

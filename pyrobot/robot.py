@@ -55,8 +55,8 @@ class PyRobot():
         self.stock_frame: StockFrame = None
         self.paper_trading = paper_trading
 
-        self._bar_size = None
-        self._bar_type = None
+        self._frequency = None
+        self._frequency_type = None
 
     def _create_session(self) -> TDClient:
         """Start a new session.
@@ -443,8 +443,8 @@ class PyRobot():
 
         return quotes
 
-    def grab_historical_prices(self, start: datetime, end: datetime, bar_size: int = 1,
-                               bar_type: str = 'minute', symbols: List[str] = None) -> List[dict]:
+    def grab_historical_prices(self, start: datetime=None, end: datetime=None, period_type='day', period=None, frequency: int = 1,
+                               frequency_type: str = 'minute', symbols: List[str] = None) -> List[dict]:
         """Grabs the historical prices for all the postions in a portfolio.
 
         Overview:
@@ -460,10 +460,13 @@ class PyRobot():
 
         Keyword Arguments:
         ----
-        bar_size {int} -- Defines the size of each bar. (default: {1})
+        frequency {int} -- Defines the size of each bar. (default: {1})
 
-        bar_type {str} -- Defines the bar type, can be one of the following:
-            `['minute', 'week', 'month', 'year']` (default: {'minute'})
+        frequency_type {str} -- Defines the bar type, can be one of the following:
+            `['minute', 'week', 'month', 'year']` (default: {'minute'}). Note
+            that the bar type (frequency type) must be in a time unit smaller
+            than the period type (e.g., 'day' period can only accept 'minute'
+            frequency type)
 
         symbols {List[str]} -- A list of ticker symbols to pull. (default: None)
 
@@ -483,33 +486,45 @@ class PyRobot():
             >>> historical_prices = trading_robot.grab_historical_prices(
                     start=end_date,
                     end=start_date,
-                    bar_size=1,
-                    bar_type='minute'
+                    frequency=1,
+                    frequency_type='minute'
                 )
         """
 
-        self._bar_size = bar_size
-        self._bar_type = bar_type
-
-        start = str(milliseconds_since_epoch(dt_object=start))
-        end = str(milliseconds_since_epoch(dt_object=end))
+        self._frequency = frequency
+        self._frequency_type = frequency_type
 
         new_prices = []
 
         if not symbols:
             symbols = self.portfolio.positions
 
+        if start and end:
+            start = str(milliseconds_since_epoch(dt_object=start))
+            end = str(milliseconds_since_epoch(dt_object=end))
+
         for symbol in symbols:
 
-            historical_prices_response = self.session.get_price_history(
-                symbol=symbol,
-                period_type='day',
-                start_date=start,
-                end_date=end,
-                frequency_type=bar_type,
-                frequency=bar_size,
-                extended_hours=True
-            )
+            if start and end:
+                historical_prices_response = self.session.get_price_history(
+                    symbol=symbol,
+                    period_type=period_type,
+                    start_date=start,
+                    end_date=end,
+                    frequency_type=frequency_type,
+                    frequency=frequency,
+                    extended_hours=True
+                )
+            
+            elif period:
+                historical_prices_response = self.session.get_price_history(
+                    symbol=symbol,
+                    period_type=period_type,
+                    period=period,
+                    frequency_type=frequency_type,
+                    frequency=frequency,
+                    extended_hours=True
+                )
 
             self.historical_prices[symbol] = {}
             self.historical_prices[symbol]['candles'] = historical_prices_response['candles']
@@ -549,8 +564,8 @@ class PyRobot():
         """
 
         # Grab the info from the last quest.
-        bar_size = self._bar_size
-        bar_type = self._bar_type
+        frequency = self._frequency
+        frequency_type = self._frequency_type
 
         # Define the start and end date.
         end_date = datetime.today()
@@ -571,8 +586,8 @@ class PyRobot():
                     period_type='day',
                     start_date=start,
                     end_date=end,
-                    frequency_type=bar_type,
-                    frequency=bar_size,
+                    frequency_type=frequency_type,
+                    frequency=frequency,
                     extended_hours=True
                 )
 
@@ -586,8 +601,8 @@ class PyRobot():
                     period_type='day',
                     start_date=start,
                     end_date=end,
-                    frequency_type=bar_type,
-                    frequency=bar_size,
+                    frequency_type=frequency_type,
+                    frequency=frequency,
                     extended_hours=True
                 )
 
