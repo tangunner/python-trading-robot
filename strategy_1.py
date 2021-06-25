@@ -193,9 +193,7 @@ trades_dict = {
             'trade_func': trading_robot.trades['long_spy'],
             'trade_id': trading_robot.trades['long_spy'].trade_id
         },
-        'sell': {
-
-        }
+        'sell': {}
     }
 }
 
@@ -203,8 +201,6 @@ try:
     positions = trading_robot.get_positions(account_number=ACCOUNT_NUMBER)
 except:
     positions = trading_robot_portfolio.positions
-print(positions)
-
 
 """Below is for doing live trading. NOTE THIS STILL NEEDS TO INCLUDE
 FUNCTIONALITY TO FLAG WHEN A TRADE HAS BEEN EXECUTED - OTHERWISE IT WILL KEEP
