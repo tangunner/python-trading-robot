@@ -20,6 +20,7 @@ class Portfolio():
         account_number {str} -- An accout number to associate with the Portfolio. (default: {None})
         """
 
+        self.cash = 0.00
         self.positions = {}
         self.positions_count = 0
 

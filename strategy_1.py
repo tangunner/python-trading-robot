@@ -209,7 +209,7 @@ EXECUTING THE SAME TRADES"""
 # Continues checking for indicators as long as the market is open
 while trading_robot.regular_market_open:
 
-    # Grab the latest bar.
+    # Grab the latest bar for each ticker in the portfolio -> List[Dicts]
     latest_bars = trading_robot.get_latest_bar()
 
     # Add to the Stock Frame.

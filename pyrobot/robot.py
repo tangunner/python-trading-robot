@@ -563,7 +563,7 @@ class PyRobot():
             >>> latest_bars
         """
 
-        # Grab the info from the last quest.
+        # Grab the info from the last request.
         frequency = self._frequency
         frequency_type = self._frequency_type
 
@@ -580,7 +580,6 @@ class PyRobot():
 
             try:
 
-                # Grab the request.
                 historical_prices_response = self.session.get_price_history(
                     symbol=symbol,
                     period_type='day',
@@ -595,7 +594,6 @@ class PyRobot():
 
                 time_true.sleep(2)
 
-                # Grab the request.
                 historical_prices_response = self.session.get_price_history(
                     symbol=symbol,
                     period_type='day',
@@ -875,7 +873,7 @@ class PyRobot():
 
         # First check if the file alread exists.
         if file_path.exists():
-            with open('data/orders.json', 'r') as order_json:
+            with open('python-trading-robot/data/orders.json', 'r') as order_json:
                 orders_list = json.load(order_json)
         else:
             orders_list = []
@@ -884,7 +882,7 @@ class PyRobot():
         orders_list = orders_list + order_response_dict
 
         # Write the new data back.
-        with open(file='data/orders.json', mode='w+') as order_json:
+        with open(file='python-trading-robot/data/orders.json', mode='w+') as order_json:
             json.dump(obj=orders_list, fp=order_json, indent=4, default=default)
 
         return True

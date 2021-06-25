@@ -221,6 +221,103 @@ class StockFrame():
                     self._frame.columns)
             ))
 
+    def _check_current_signals(self, bar, indicators: dict, indciators_comp_key: List[str], indicators_key: List[str]):
+        # Grab the current row
+        last_rows = bar
+
+        # Define a list of conditions.
+        conditions = {}
+
+        # Check to see if all the columns exist.
+        if self.do_indicator_exist(column_names=indicators_key):
+
+            for indicator in indicators_key:
+
+                column = last_rows[indicator]
+                if isinstance(column, (str, bool, float, int)):
+                    column = pd.Series([column])
+
+                # Grab the Buy & Sell Condition.
+                buy_condition_target = indicators[indicator]['buy']
+                sell_condition_target = indicators[indicator]['sell']
+
+                buy_condition_operator = indicators[indicator]['buy_operator']
+                sell_condition_operator = indicators[indicator]['sell_operator']
+
+                condition_1: pd.Series = buy_condition_operator(
+                    column, buy_condition_target
+                )
+                condition_2: pd.Series = sell_condition_operator(
+                    column, sell_condition_target
+                )
+
+                # if len(indicators_key) == 1:
+                #     condition_1 = condition_1 if condition_1 == True else None
+                #     condition_2 = condition_2 if condition_2 == True else None
+
+                # else:
+                condition_1 = condition_1.where(lambda x: x == True).dropna()
+                condition_2 = condition_2.where(lambda x: x == True).dropna()
+
+                conditions['buys'] = condition_1
+                conditions['sells'] = condition_2
+        
+        # Store the indicators in a list.
+        check_indicators = []
+        
+        # Split the name so we can check if the indicator exist.
+        for indicator in indciators_comp_key:
+            parts = indicator.split('_comp_')
+            check_indicators += parts
+
+        if self.do_indicator_exist(column_names=check_indicators):
+
+            for indicator in indciators_comp_key:
+                
+                # Split the indicators.
+                parts = indicator.split('_comp_')
+
+                # Grab the indicators that need to be compared.
+                indicator_1 = last_rows[parts[0]]
+                indicator_2 = last_rows[parts[1]]
+
+                # If we have a buy operator, grab it.
+                if indicators[indicator]['buy_operator']:
+
+                    # Grab the Buy Operator.
+                    buy_condition_operator = indicators[indicator]['buy_operator']
+
+                    # Grab the Condition.
+                    condition_1: pd.Series = buy_condition_operator(
+                        indicator_1, indicator_2
+                    )
+
+                    # Keep the one's that aren't null.
+                    condition_1 = condition_1.where(lambda x: x == True).dropna()
+
+                    # Add it as a buy signal.
+                    conditions['buys'] = condition_1
+
+                # If we have a sell operator, grab it.
+                if indicators[indicator]['sell_operator']:
+
+                    # Grab the Sell Operator.
+                    sell_condition_operator = indicators[indicator]['sell_operator']
+
+                    # Store it in a Pd.Series.
+                    condition_2: pd.Series = sell_condition_operator(
+                        indicator_1, indicator_2
+                    )
+
+                    # keep the one's that aren't null.
+                    condition_2 = condition_2.where(lambda x: x == True).dropna()
+
+                    # Add it as a sell signal.
+                    conditions['sells'] = condition_2
+
+        return conditions
+
+    
     def _check_signals(self, indicators: dict, indciators_comp_key: List[str], indicators_key: List[str]) -> Union[pd.DataFrame, None]:
         """Returns the last row of the StockFrame if conditions are met.
 

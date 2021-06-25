@@ -99,7 +99,7 @@ class Indicators():
         # Add the key if it doesn't exist.
         if indicator not in self._indicator_signals:
             self._indicator_signals[indicator] = {}
-            self._indicators_key.append(indicator)      
+            self._indicators_key.append(indicator)
 
         # Add the signals.
         self._indicator_signals[indicator]['buy'] = buy     
@@ -242,15 +242,24 @@ class Indicators():
         )
 
         self._frame['st_decline'] = 1 - abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
-        
-        
-        
-        # self._frame.drop(
-        #     labels=['period_max'],
-        #     axis=1,
-        #     inplace=True
-        # )
+        return self._frame
 
+    def ext_period_ratio(self, extended_period: int, column_name: str = 'ext_period_ratio') -> pd.DataFrame:
+        """Calculates the ratio of current price to max price over the extended_period
+        """
+
+        locals_data = locals()
+        del locals_data['self']
+
+        self._current_indicators[column_name] = {}
+        self._current_indicators[column_name]['args'] = locals_data
+        self._current_indicators[column_name]['func'] = self.ext_period_ratio
+        
+        self._frame['ext_period_max'] = self._price_groups['close'].transform(
+            lambda x: x.rolling(window=extended_period).max()
+        )
+
+        self._frame['ext_period_ratio'] = self._frame['close'] / self._frame['ext_period_max']
         return self._frame
 
     
@@ -1068,6 +1077,24 @@ class Indicators():
         """
 
         signals_df = self._stock_frame._check_signals(
+            indicators=self._indicator_signals,
+            indciators_comp_key=self._indicators_comp_key,
+            indicators_key=self._indicators_key
+        )
+
+        return signals_df
+
+    def check_current_signals(self, bar) -> Union[pd.DataFrame, None]:
+        """Checks to see if any signals have been generated.
+
+        Returns:
+        ----
+        {Union[pd.DataFrame, None]} -- If signals are generated then a pandas.DataFrame
+            is returned otherwise nothing is returned.
+        """
+
+        signals_df = self._stock_frame._check_current_signals(
+            bar=bar,
             indicators=self._indicator_signals,
             indciators_comp_key=self._indicators_comp_key,
             indicators_key=self._indicators_key
