@@ -1,8 +1,6 @@
 import os
 import sys
 
-from numpy import sign
-
 currentdir = f"{str(os.getcwd())}\\python-trading-robot"
 parentdir = os.path.dirname(currentdir)
 if currentdir not in sys.path:
@@ -16,15 +14,16 @@ if f"{parentdir}\\td-ameritrade-python-api" not in sys.path:
     sys.path.append(f"{parentdir}\\td-ameritrade-python-api\\td")
 
 import operator
+import numpy as np
 import pandas as pd
 import logging
-import pprint
 
 from datetime import datetime, timedelta
 from configparser import ConfigParser
 
 from pyrobot.robot import PyRobot
 from pyrobot.indicators import Indicators
+
 
 logging.basicConfig(filename='backtest.log', encoding='utf-8', level=logging.DEBUG)
 
@@ -39,6 +38,7 @@ ACCOUNT_NUMBER = config.get('main', 'ACCOUNT_NUMBER')
 symbol = 'SPY'
 paper_trading = True
 backtesting = True
+
 trading_robot = PyRobot(
     client_id=CLIENT_ID,
     redirect_uri=REDIRECT_URI,
@@ -48,9 +48,8 @@ trading_robot = PyRobot(
 )
 
 trading_robot.create_portfolio()
+trading_robot_accounts = trading_robot.get_accounts()
 
-trading_robot_accounts = trading_robot.session.get_accounts(account=ACCOUNT_NUMBER)
-account_cash = trading_robot_accounts['securitiesAccount']['currentBalances']['cashAvailableForTrading']
 
 class PaperTradingAccount(object):
     def __init__(self):
@@ -59,26 +58,37 @@ class PaperTradingAccount(object):
         self.useRealCashBal = False
         self.minCashThreshold = 0.20
         self.minCash = self.cash * self.minCashThreshold
-        self.transactionCosts = 0.01
-        self.STTaxes = 0.20             # ST tax = personal income tax rate
-        self.LTTaxes = 0.15             # LT tax is typically 15%
-        
-    
-    def getUpdatedMinCash(self, trading_robot=None):
+        self.txCosts = 0.01
+        self.STCapGainTax = 0.20                  # ST tax = personal tax rate
+        self.LTCapGainTax = 0.15                  # LT tax typically 15%
+        self.backtestEndDate = datetime.today()
+        self.backtestStartDate = datetime.today() - timedelta(365)
+            
+    def getUpdatedMinCash(self, trading_robot):
         if not trading_robot.portfolio or not trading_robot.portfolio.positions:
             self.minCash = self.cash * self.minCashThreshold
-        else:
-            if trading_robot.regular_market_open():
-                current_prices=trading_robot.grab_current_quotes()
-            else:
-                current_prices = [{p['symbol']: p['close']} for p in trading_robot.get_latest_bar()]
-                
-            portfolio_mv = trading_robot.portfolio.projected_market_value(current_prices)['total']['total_market_value'].item()
-            self.minCash = (portfolio_mv + self.cash) * self.minCashThreshold
+            return self.minCash
         
+        if trading_robot.regular_market_open():
+            current_prices=trading_robot.grab_current_quotes()
+        else:
+            current_prices = {}
+            for symbol in trading_robot.portfolio.positions:
+                current_prices[symbol] = [bar for bar in trading_robot.get_latest_bar() if bar['symbol'] == symbol][0]
+            
+        portfolio_mv = trading_robot.portfolio.projected_market_value(current_prices)['total']['market_value']
+        self.minCash = (portfolio_mv + self.cash) * self.minCashThreshold
         return self.minCash
 
-account = PaperTradingAccount()
+    def setBacktestDates(self, historical_prices):
+        self.backtestStartDate = historical_prices['aggregated'][0]['datetime']
+        self.backtestEndDate = historical_prices['aggregated'][-1]['datetime']
+
+    def setRealCashBalance(self, trading_robot_accounts):
+        account_cash = trading_robot_accounts['securitiesAccount']['currentBalances']['cashAvailableForTrading']
+        if account_cash:
+            self.cash = account_cash
+
 
 historical_prices = trading_robot.grab_historical_prices(
     period_type='year',
@@ -88,26 +98,25 @@ historical_prices = trading_robot.grab_historical_prices(
     symbols=[symbol]
 )
 
-# Convert data to a StockFrame. hist_prices['aggregated'] -> List[dicts]
+account = PaperTradingAccount()
+account.setBacktestDates(historical_prices)
+
+# Convert data to a StockFrame
 stock_frame = trading_robot.create_stock_frame(data=historical_prices['aggregated'])
 trading_robot.portfolio.historical_prices = historical_prices
 trading_robot.portfolio.stock_frame = stock_frame
 
 # Create an Indicator object and add the indicators
 indicator_client = Indicators(price_data_frame=stock_frame)
-
 indicator_client.change_in_price()
 
 # premium = 1.20
 # indicator_client.close_to_avg_ratio(period=30, premium=premium)
 
+# discount_ratios = np.linspace(0.5, 1.0, num=5, endpoint=False)
 discount_ratios = [0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30, 0.20]   # 1 - pct discount
 interval = 0.10
 indicator_client.discount_ratio(period=30, discounts=discount_ratios, interval=interval)
-indicator_client._frame.dropna(subset=['discount_ratio'], inplace=True)
-
-# pd.set_option('display.max_rows', indicator_client._frame.shape[0]+1)
-# print(indicator_client._frame)
 
 # # Add the close price/avg price premium (sell) signal
 # indicator_client.set_indicator_signal(
@@ -124,12 +133,10 @@ for discount in discount_ratios:
     indicator_client.set_indicator_signal(
         indicator=col,
         buy=1,
-        sell=1.01,                      # outside possible vals to restrict sales
+        sell=1.01,
         condition_buy=operator.eq,
         condition_sell=operator.eq
     )
-
-# pprint.pprint(indicator_client._indicator_signals)
 
 enter_spy = trading_robot.create_trade(
     trade_id='long_spy',
@@ -145,7 +152,6 @@ enter_spy = trading_robot.create_trade(
 #     order_type='mkt'
 # )
 
-
 trades_dict = {
     symbol: {
         'buy': {
@@ -159,36 +165,27 @@ trades_dict = {
     }
 }
 
-
 # pd.set_option('display.max_rows', indicator_client._frame.shape[0]+1)
 # print(indicator_client._frame)
 
 account.getUpdatedMinCash(trading_robot)
 
-"""Add the buy/sell conditionality here; the price frame created above will just
-contain the metrics used in evaluating the below conditions"""
-
-# beg_loop = datetime.now()
-
-# iter over rows in the DF; idx = (symbol, date); bar = (col labels)
-# for idx, bar in indicator_client._frame.iterrows():
 
 # iter over all the dates in the historical data
 for idx, bar in indicator_client._frame.groupby(level=1):
-    # print(idx)
-    # print(bar)
-    # print(type(bar))
-    # break
-
     date = bar.index[0][1]
 
-    # grab the indicators already used to buy or sell shares of this security
+    # update and store the portfolio market values
+    if trading_robot.portfolio.positions:
+        current_prices = {}
+        for symbol in trading_robot.portfolio.positions:
+            current_prices[symbol] = historical_prices[symbol]['candles'][-1]
+
+    # grab the indicators that were used to buy or sell current shares
     locked_indicators = trading_robot.portfolio.check_portfolio_indicators(symbol=bar.index[0][0])
 
     if locked_indicators:
         signals = indicator_client.check_current_signals(bar=bar, locked_indicators=locked_indicators)
-        # print(signals)
-
     else:
         signals = indicator_client.check_current_signals(bar=bar)
 
@@ -231,6 +228,9 @@ for idx, bar in indicator_client._frame.groupby(level=1):
         logging.info(f'{date} -- Locked indicators: {locked_indicators}')
         print(f'{date} -- Locked indicators: {locked_indicators}')
         
+        """NOTE: a.item() only takes the first val in the arr; wouldn't work if
+        there were multiple symbols passed"""
+
         price = bar['close'].item()
         disc_ratio = bar['discount_ratio'].item()
         quantity = int(account.lotSizing / price)
@@ -254,7 +254,8 @@ for idx, bar in indicator_client._frame.groupby(level=1):
             continue
         
         account.cash -= cost_basis
-        account.cash -= account.transactionCosts*cost_basis
+        account.cash -= account.txCosts*cost_basis
+        print(f'tx_costs: {account.txCosts*cost_basis}')
         
         # Add order leg
         enter_spy.instrument(
@@ -276,8 +277,6 @@ for idx, bar in indicator_client._frame.groupby(level=1):
             purchase_price=price,
             indicator_used=signals['buys'].name
         )
-
-        
         
         tot_shrs = trading_robot.portfolio.positions[symbol]['quantity']
         print(f'{date} -- BUY: {symbol} >> {quantity} @ ${price}')
@@ -287,7 +286,7 @@ for idx, bar in indicator_client._frame.groupby(level=1):
 
     else:
         # logging.info(f'{bar.index[0][1]} -- No signals')
-        # print(f'{bar.index[0][1]} -- No signals')
+        print(f'{bar.index[0][1]} -- No signals')
         continue
 
     # Execute Trades.
@@ -310,10 +309,9 @@ if not trading_robot.portfolio.positions:
 
 market_open_flag = trading_robot.regular_market_open
 
-# if market closed, use last close price as market value
+# if market closed, use last close price as current price
 if market_open_flag:
     current_prices = trading_robot.grab_current_quotes()
-
 else:
     current_prices = {}
     try:
@@ -324,17 +322,40 @@ else:
             current_prices[symbol] = historical_prices[symbol]['candles'][-1]
 
 proj_val = trading_robot.portfolio.projected_market_value(current_prices)
-port_value = proj_val['total']['total_market_value']
-inv_cap = proj_val['total']['total_invested_capital']
-# port_value = trading_robot.portfolio.market_value + account.cash
+port_value = proj_val['total']['market_value']
+inv_cap = proj_val['total']['invested_capital']
 
-port_return_incl_cash = round(((port_value + account.cash - 100000) / (100000)), 4)
-port_return_excl_cash = round(((port_value - inv_cap) / inv_cap), 4)
+print(f'SUMMARY RETURNS')
+print('--'*25)
+print('Market Value:', trading_robot.portfolio.market_value)
+print('Invested Capital:', trading_robot.portfolio.invested_capital)
+print('Profit Loss:', trading_robot.portfolio.profit_loss)
+print('Max Drawdown:')
+print('Total Return:', trading_robot.portfolio.total_return)
+ann_return = round((trading_robot.portfolio.total_return * (365 / (account.backtestEndDate - account.backtestStartDate).days)), 4)
+print('Annualized Return:', ann_return)
+print()
+print(f'BENCHMARK ({symbol}) RETURNS')
+spy_tot_return = round(((historical_prices['aggregated'][-1]['close'] - historical_prices['aggregated'][0]['close']) / historical_prices['aggregated'][0]['close']), 4)
+spy_ann_return = round((spy_tot_return * (365 / (account.backtestEndDate - account.backtestStartDate).days)), 4)
+print('Max Drawdown:')
+print('Total Return:', spy_tot_return)
+print('Annualized Return:', spy_ann_return)
+print()
+print('Strategy Alpha:', (ann_return - spy_ann_return))
+print('--'*40)
 
-logging.info('--'*25)
-logging.info(f'Portfolio return (excl cash): {port_return_excl_cash}')
-logging.info(f'Portfolio return (incl cash): {port_return_incl_cash}')
-logging.info('--'*50)
+
+# port_return_incl_cash = round(((port_value + account.cash - 100000) / (100000)), 4)
+# port_return_excl_cash = round(((port_value - inv_cap) / inv_cap), 4)
+# print('port_return_incl_cash', port_return_incl_cash)
+# print('port_return_excl_cash', port_return_excl_cash)
+# print('--'*40)
+
+# logging.info('--'*25)
+# logging.info(f'Portfolio return (excl cash): {port_return_excl_cash}')
+# logging.info(f'Portfolio return (incl cash): {port_return_incl_cash}')
+# logging.info('--'*50)
 
 # while True:
 

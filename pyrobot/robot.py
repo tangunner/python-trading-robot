@@ -46,6 +46,7 @@ class PyRobot():
 
         # Set the attirbutes
         self.trading_account = trading_account
+        self.account_balances = None
         self.client_id = client_id
         self.redirect_uri = redirect_uri
         self.credentials_path = credentials_path
@@ -579,9 +580,7 @@ class PyRobot():
 
         # Loop through each symbol.
         for symbol in self.portfolio.positions:
-
             try:
-
                 historical_prices_response = self.session.get_price_history(
                     symbol=symbol,
                     period_type='day',
@@ -593,9 +592,7 @@ class PyRobot():
                 )
 
             except:
-
                 time_true.sleep(2)
-
                 historical_prices_response = self.session.get_price_history(
                     symbol=symbol,
                     period_type='day',
@@ -608,7 +605,6 @@ class PyRobot():
 
             # parse the candles.
             for candle in historical_prices_response['candles'][-1:]:
-
                 new_price_mini_dict = {}
                 new_price_mini_dict['symbol'] = symbol
                 new_price_mini_dict['open'] = candle['open']
@@ -716,7 +712,7 @@ class PyRobot():
         # If we have buys or sells continue.
         if not sells.empty:
 
-            # Grab the buy Symbols.
+            # Grab the sell symbols.
             symbols_list = sells.index.get_level_values(0).to_list()
 
             # Loop through each symbol.
@@ -774,7 +770,7 @@ class PyRobot():
         
         if not buys.empty:
 
-            # Grab the buy Symbols.
+            # Grab the buy symbols.
             symbols_list = buys.index.get_level_values(0).to_list()
 
             # Loop through each symbol.
@@ -977,11 +973,11 @@ class PyRobot():
         )
 
         # Parse the account info.
-        accounts_parsed = self._parse_account_balances(
+        self.account_balances = self._parse_account_balances(
             accounts_response=accounts
         )
 
-        return accounts_parsed
+        return self.account_balances
 
     def _parse_account_balances(self, accounts_response: Union[Dict, List]) -> List[Dict]:
         """Parses an Account response into a more simplified dictionary.

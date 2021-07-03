@@ -169,7 +169,7 @@ class Portfolio():
             position_lot['indicator_used'] = indicator_used
             self.position_lots[symbol].append(position_lot)
 
-            # update the position values (price is the WA purchase price)
+            # update the position values (purchase price is the WA price)
             self.positions[symbol]['quantity'] += quantity
             self.positions[symbol]['cost_basis'] += quantity * purchase_price
             self.positions[symbol]['purchase_price'] = (
@@ -272,7 +272,7 @@ class Portfolio():
         else:
             return (False, "{symbol} did not exist in the porfolio.".format(symbol=symbol))
     
-    def update_metrics(self):
+    def update_metrics(self, current_prices: dict):
         """Updates the returns for each position and the overall portfolio"""
         
         self._total_return = self.total_return
@@ -284,17 +284,33 @@ class Portfolio():
         self.invested_capital = 0
         
         for symbol in self.positions:
-            current_price = self.positions[symbol]['current_price']
+            try:
+                current_price = self.positions[symbol]['current_price']
+            except KeyError:
+                current_price
+            
             for lot in self.position_lots[symbol]:
-                lot['total_return_$'] = (current_price - lot['cost_basis'])
-                lot['total_return_%'] = round((lot['gross_return_$'] / lot['cost_basis']), 4)
-                # lot['annualized_return_%'] = round((lot['gross_return_$'] / lot['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+                lot['profit_loss'] = (current_price - lot['cost_basis'])
+                lot['total_return'] = round((lot['gross_return_$'] / lot['cost_basis']), 4)
+                # lot['annualized_return'] = round((lot['gross_return_$'] / lot['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
 
-            self.positions[symbol]['total_return_$'] = sum([lot['gross_return_$'] for lot in self.position_lots[symbol]])
-            self.positions[symbol]['total_return_%'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']), 4)
-            # self.positions[symbol]['annualized_return_%'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+            self.positions[symbol]['profit_loss'] = sum([lot['gross_return_$'] for lot in self.position_lots[symbol]])
+            self.positions[symbol]['total_return'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']), 4)
+            # self.positions[symbol]['annualized_return'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
         
+        for symbol in current_prices:
+            if self.in_portfolio(symbol=symbol):
+                current_quantity = self.positions[symbol]['quantity']
+                purchase_price = self.positions[symbol]['purchase_price']
+                try:
+                    current_price = current_prices[symbol]['lastPrice']
+                except KeyError:
+                    current_price = current_prices[symbol]['close']
 
+                self.positions[symbol]['current_price'] = current_price
+
+                for lot in self.position_lots[symbol]:
+                    lot['market_value'] = lot['quantity'] * current_price
 
 
     def total_allocation(self) -> dict:
@@ -427,8 +443,8 @@ class Portfolio():
         # Calc the weights
         for symbol in projected_market_value_dict:
             if symbol != 'total':
-                weights[symbol] = projected_market_value_dict[symbol]['total_market_value'] / \
-                    projected_market_value_dict['total']['total_market_value']
+                weights[symbol] = projected_market_value_dict[symbol]['market_value'] / \
+                    projected_market_value_dict['total']['market_value']
 
         return weights
 
@@ -445,9 +461,9 @@ class Portfolio():
         portfolio_summary_dict['projected_market_value'] = self.projected_market_value(
             current_prices=quotes
         )
+        
         portfolio_summary_dict['portfolio_weights'] = self.portfolio_weights()
         portfolio_summary_dict['portfolio_risk'] = ""
-
         return portfolio_summary_dict
 
     def in_portfolio(self, symbol: str) -> bool:
@@ -585,7 +601,7 @@ class Portfolio():
 
         projected_value = {}
         total_value = 0.0
-        total_invested_capital = 0.0
+        invested_capital = 0.0
         total_profit_or_loss = 0.0
 
         position_count_profitable = 0
@@ -597,53 +613,62 @@ class Portfolio():
                 projected_value[symbol] = {}
                 current_quantity = self.positions[symbol]['quantity']
                 purchase_price = self.positions[symbol]['purchase_price']
+                
                 try:
                     current_price = current_prices[symbol]['lastPrice']
                 except KeyError:
                     current_price = current_prices[symbol]['close']
 
+                self.positions[symbol]['current_price'] = current_price
+
+                for lot in self.position_lots[symbol]:
+                    lot['market_value'] = lot['quantity'] * current_price
+                    lot['profit_loss'] = lot['market_value'] - lot['cost_basis']
+                    lot['total_return'] = round((lot['profit_loss'] / lot['cost_basis']), 4)
+                    lot['annualized_return'] = round((lot['profit_loss'] / lot['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+                
                 projected_value[symbol]['purchase_price'] = purchase_price
                 projected_value[symbol]['current_price'] = current_price
                 projected_value[symbol]['quantity'] = current_quantity
 
                 # Calculate total market value.
-                projected_value[symbol]['total_market_value'] = (
+                projected_value[symbol]['market_value'] = (
                     current_price * current_quantity
                 )
 
                 # Calculate total invested capital.
-                projected_value[symbol]['total_invested_capital'] = (
+                projected_value[symbol]['invested_capital'] = (
                     current_quantity * purchase_price
                 )
 
-                projected_value[symbol]['total_loss_or_gain_$'] = ((current_price - purchase_price) * current_quantity)
-                projected_value[symbol]['total_loss_or_gain_%'] = round(((current_price - purchase_price) / purchase_price), 4)
-                projected_value[symbol]['annualized_return_%'] = round(((current_price - purchase_price) / purchase_price) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+                projected_value[symbol]['profit_loss'] = ((current_price - purchase_price) * current_quantity)
+                projected_value[symbol]['total_return'] = round(((current_price - purchase_price) / purchase_price), 4)
+                projected_value[symbol]['annualized_return'] = round(((current_price - purchase_price) / purchase_price) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
 
-                total_value += projected_value[symbol]['total_market_value']
-                total_profit_or_loss += projected_value[symbol]['total_loss_or_gain_$']
-                total_invested_capital += projected_value[symbol]['total_invested_capital']
+                total_value += projected_value[symbol]['market_value']
+                total_profit_or_loss += projected_value[symbol]['profit_loss']
+                invested_capital += projected_value[symbol]['invested_capital']
 
-                if projected_value[symbol]['total_loss_or_gain_$'] > 0:
+                if projected_value[symbol]['profit_loss'] > 0:
                     position_count_profitable += 1
-                elif projected_value[symbol]['total_loss_or_gain_$'] < 0:
+                elif projected_value[symbol]['profit_loss'] < 0:
                     position_count_not_profitable += 1
                 else:
                     position_count_break_even += 1
 
         projected_value['total'] = {}
-        projected_value['total']['total_positions'] = len(self.positions)
-        projected_value['total']['total_market_value'] = total_value
-        projected_value['total']['total_invested_capital'] = total_invested_capital
+        projected_value['total']['positions_count'] = len(self.positions)
+        projected_value['total']['market_value'] = total_value
+        projected_value['total']['invested_capital'] = invested_capital
         projected_value['total']['total_profit_or_loss'] = total_profit_or_loss
-        projected_value['total']['number_of_profitable_positions'] = position_count_profitable
-        projected_value['total']['number_of_non_profitable_positions'] = position_count_not_profitable
-        projected_value['total']['number_of_breakeven_positions'] = position_count_break_even
+        projected_value['total']['count_profitable_positions'] = position_count_profitable
+        projected_value['total']['count_non_profitable_positions'] = position_count_not_profitable
+        projected_value['total']['count_breakeven_positions'] = position_count_break_even
 
         self.market_value = total_value
-        self.invested_capital = total_invested_capital
+        self.invested_capital = invested_capital
         self.profit_loss = total_profit_or_loss
-        # self.total_return = round(((total_value - total_invested_capital) / total_invested_capital), 4)
+        self.total_return = round(((total_value - invested_capital) / invested_capital), 4)
 
         return projected_value
 

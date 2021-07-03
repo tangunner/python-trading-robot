@@ -220,8 +220,9 @@ class Indicators():
             lambda x: x.diff()                                                 # finally, calculate the actual change in close price
         )
 
-        self._frame['log_change_in_price'] = self._price_groups['close'].apply(np.log).diff(1)
-
+        self._frame['log_change_in_price'] = self._price_groups['close'].transform(
+            lambda x: np.log(x).diff()
+        )
         return self._frame
 
     def discount_ratio(self, period: int, discounts: list, interval: float = 0.10, column_name: str = 'discount_ratio') -> pd.DataFrame:
@@ -247,13 +248,42 @@ class Indicators():
 
         self._frame['discount_ratio'] = 1 - abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
         
+        # drop rows that won't have indicator signals
+        idx_names = self._frame[(self._frame['discount_ratio'] > max(discounts)) & (self._frame['discount_ratio'] < 1)].index
+        self._frame.drop(idx_names, inplace=True)
+
         for discount in discounts:
             col = f'discount_ratio_{str(int(discount*100))}'
-            self._frame[col] = np.where((self._frame['discount_ratio'] <= discount) & \
-                                        (self._frame['discount_ratio'] > (discount - interval)), 1, -1)
+            self._frame[col] = np.where((self._frame['discount_ratio'] <= discount), 1, -1)
+            # self._frame[col] = np.where((self._frame['discount_ratio'] <= discount) & \
+            #                             (self._frame['discount_ratio'] > (discount - interval)), 1, -1)
+
         self._frame.dropna(inplace=True)
         return self._frame
 
+    # def first_discount_return(self, required_return: float, discounts: list, column_name='first_discount_return'):
+    #     """Calcs the % return on the first (highest) discount ratio"""
+        
+    #     locals_data = locals()
+    #     del locals_data['self']
+
+    #     self._current_indicators[column_name] = {}
+    #     self._current_indicators[column_name]['args'] = locals_data
+    #     self._current_indicators[column_name]['func'] = self.first_discount_return
+        
+    #     first_discount = max(discounts)
+    #     first_discount_col = f'discount_ratio_{str(int(first_discount*100))}'
+    #     self._frame['dates_discount_reached'] = np.where((self._frame[first_discount_col] == 1), self._frame.index[1], 0)
+        
+    #     self._frame[column_name] = self._price_groups['close'].transform(
+    #         lambda x: x.pct_change(periods=period)
+    #     )
+        
+        
+    #     col = f'return_on_discount_{str(int(first_discount*100))}'
+    #     self._frame[f'cost_basis_{str(int(first_discount*100))}'] = 
+    #     self._frame[col] = 
+    
     def close_to_avg_ratio(self, period: int, premium: float = 1.20, column_name: str = 'close_to_avg_ratio') -> pd.DataFrame:
         """Calculates the ratio of current price to the avg close price over the
         period
