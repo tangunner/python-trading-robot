@@ -435,14 +435,19 @@ class PyRobot():
 
         """
 
-        # First grab all the symbols.
         symbols = self.portfolio.positions.keys()
-
-        # Grab the quotes.
         quotes = self.session.get_quotes(instruments=list(symbols))
+        
+        for symbol in symbols:
+            self.portfolio.positions[symbol]['current_price'] = quotes[symbol]['lastPrice']
 
         return quotes
 
+    # def get_returns(self):
+    #     for symbol in self.portfolio.positions:
+            
+    #         pass
+    
     def grab_historical_prices(self, start: datetime=None, end: datetime=None, period_type='day', period=None, frequency: int = 1,
                                frequency_type: str = 'minute', symbols: List[str] = None) -> List[dict]:
         """Grabs the historical prices for all the postions in a portfolio.
@@ -504,7 +509,6 @@ class PyRobot():
             end = str(milliseconds_since_epoch(dt_object=end))
 
         for symbol in symbols:
-
             if start and end:
                 historical_prices_response = self.session.get_price_history(
                     symbol=symbol,
@@ -530,7 +534,6 @@ class PyRobot():
             self.historical_prices[symbol]['candles'] = historical_prices_response['candles']
 
             for candle in historical_prices_response['candles']:
-
                 new_price_mini_dict = {}
                 new_price_mini_dict['symbol'] = symbol
                 new_price_mini_dict['open'] = candle['open']
@@ -542,7 +545,6 @@ class PyRobot():
                 new_prices.append(new_price_mini_dict)
 
         self.historical_prices['aggregated'] = new_prices
-
         return self.historical_prices
 
     def get_latest_bar(self) -> List[dict]:
@@ -712,6 +714,64 @@ class PyRobot():
         order_responses = []
 
         # If we have buys or sells continue.
+        if not sells.empty:
+
+            # Grab the buy Symbols.
+            symbols_list = sells.index.get_level_values(0).to_list()
+
+            # Loop through each symbol.
+            for symbol in symbols_list:
+
+                # Check to see if there is a Trade object.
+                if symbol in trades_to_execute:
+
+                    # Set the Execution Flag.
+                    trades_to_execute[symbol]['has_executed'] = True
+
+                    if self.portfolio.in_portfolio(symbol=symbol):
+                        self.portfolio.set_ownership_status(
+                            symbol=symbol,
+                            ownership=False
+                        )
+
+                    trade_obj: Trade = trades_to_execute[symbol]['sell']['trade_func']
+
+                    if not self.paper_trading:
+
+                        # Execute the order.
+                        order_response = self.execute_orders(
+                            trade_obj=trade_obj
+                        )
+
+                        order_response = {
+                            'order_id': order_response['order_id'],
+                            'request_body': order_response['request_body'],
+                            'timestamp': datetime.now().isoformat()
+                        }
+
+                        order_responses.append(order_response)
+
+                    else:
+                        
+                        order_response = {
+                            'order_id': trade_obj._generate_order_id(),
+                            'request_body': trade_obj.order,
+                            'timestamp': datetime.now().isoformat()
+                        }
+
+                        # # NEW: to make sure positions get in the portfolio
+                        # self.portfolio.add_position(
+                        #     symbol=symbol, 
+                        #     asset_type=order_response['request_body']['orderLegCollection']['assetType'], 
+                        #     purchase_date=order_response['timestamp'],
+                        #     quantity=order_response['request_body']['orderLegCollection']['quantity'],
+                        #     purchase_price=order_response['request_body']['price']
+                        # )
+
+                        order_responses.append(order_response)
+
+
+        
         if not buys.empty:
 
             # Grab the buy Symbols.
@@ -756,54 +816,23 @@ class PyRobot():
                             'timestamp': datetime.now().isoformat()
                         }
 
-                        order_responses.append(order_response)
+                        # # NEW: to make sure positions get in the portfolio 
+                        # try:
+                        #     self.portfolio.add_position(
+                        #         symbol=symbol, 
+                        #         asset_type=order_response['request_body']['orderLegCollection'][0]['instrument']['assetType'], 
+                        #         purchase_date=order_response['timestamp'],
+                        #         quantity=order_response['request_body']['orderLegCollection'][0]['quantity'],
+                        #         purchase_price=order_response['request_body']['price']
+                        #     )
 
-        elif not sells.empty:
-
-            # Grab the buy Symbols.
-            symbols_list = sells.index.get_level_values(0).to_list()
-
-            # Loop through each symbol.
-            for symbol in symbols_list:
-
-                # Check to see if there is a Trade object.
-                if symbol in trades_to_execute:
-
-                    # Set the Execution Flag.
-                    trades_to_execute[symbol]['has_executed'] = True
-
-                    if self.portfolio.in_portfolio(symbol=symbol):
-                        self.portfolio.set_ownership_status(
-                            symbol=symbol,
-                            ownership=False
-                        )
-
-                    trade_obj: Trade = trades_to_execute[symbol]['sell']['trade_func']
-
-                    if not self.paper_trading:
-
-                        # Execute the order.
-                        order_response = self.execute_orders(
-                            trade_obj=trade_obj
-                        )
-
-                        order_response = {
-                            'order_id': order_response['order_id'],
-                            'request_body': order_response['request_body'],
-                            'timestamp': datetime.now().isoformat()
-                        }
+                        # except:
+                        #     print('Failed to add position to portfolio.')
 
                         order_responses.append(order_response)
 
-                    else:
-
-                        order_response = {
-                            'order_id': trade_obj._generate_order_id(),
-                            'request_body': trade_obj.order,
-                            'timestamp': datetime.now().isoformat()
-                        }
-
-                        order_responses.append(order_response)
+        if buys.empty and sells.empty:
+            return None
 
         # Save the response.
         self.save_orders(order_response_dict=order_responses)
@@ -869,7 +898,7 @@ class PyRobot():
             folder.mkdir()
 
         # Define the file path.
-        file_path = folder.joinpath('orders.json')
+        file_path = folder.joinpath('python-trading-robot/data/orders.json')
 
         # First check if the file alread exists.
         if file_path.exists():

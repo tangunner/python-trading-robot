@@ -1,4 +1,5 @@
 import numpy as np
+from datetime import datetime, timedelta
 
 from pandas import DataFrame
 from typing import Tuple
@@ -22,10 +23,13 @@ class Portfolio():
 
         self.cash = 0.00
         self.positions = {}
+        self.position_lots = {}
         self.positions_count = 0
 
+        self.total_return = 0.00
         self.profit_loss = 0.00
         self.market_value = 0.00
+        self.invested_capital = 0.00
         self.risk_tolerance = 0.00
         self.account_number = account_number
 
@@ -44,7 +48,9 @@ class Portfolio():
 
         Arguments:
         ----
-        positions {list[dict]} -- Multiple positions with the required arguments to be added.
+        positions {list[dict]} -- Multiple positions with the required arguments
+        to be added.
+        position_lots -- 
 
         Returns:
         ----
@@ -107,7 +113,8 @@ class Portfolio():
         else:
             raise TypeError('Positions must be a list of dictionaries.')
 
-    def add_position(self, symbol: str, asset_type: str, purchase_date: Optional[str] = None, quantity: int = 0, purchase_price: float = 0.0) -> dict:
+    def add_position(self, symbol: str, asset_type: str, purchase_date: Optional[str] = None, 
+                     quantity: int = 0, purchase_price: float = 0.0, indicator_used: str = None) -> dict:
         """Adds a single new position to the the portfolio.
 
         Arguments:
@@ -149,20 +156,82 @@ class Portfolio():
             }
         """
 
-        self.positions[symbol] = {}
-        self.positions[symbol]['symbol'] = symbol
-        self.positions[symbol]['quantity'] = quantity
-        self.positions[symbol]['purchase_price'] = purchase_price
-        self.positions[symbol]['purchase_date'] = purchase_date
-        self.positions[symbol]['asset_type'] = asset_type
+        # if security already owned, update the existing position
+        if self.in_portfolio(symbol) and self.positions[symbol]['ownership_status']:
 
-        if purchase_date:
-            self.positions[symbol]['ownership_status'] = True
+            # add the new lot to the existing position_lots entry
+            position_lot = {}
+            position_lot['quantity'] = quantity
+            position_lot['purchase_price'] = purchase_price
+            position_lot['purchase_date'] = purchase_date
+            position_lot['cost_basis'] = quantity * purchase_price            
+            position_lot['asset_type'] = asset_type
+            position_lot['indicator_used'] = indicator_used
+            self.position_lots[symbol].append(position_lot)
+
+            # update the position values (price is the WA purchase price)
+            self.positions[symbol]['quantity'] += quantity
+            self.positions[symbol]['cost_basis'] += quantity * purchase_price
+            self.positions[symbol]['purchase_price'] = (
+                self.positions[symbol]['cost_basis'] / self.positions[symbol]['quantity']
+            )
+
+
         else:
-            self.positions[symbol]['ownership_status'] = False
+            # if security not owned yet, add it to the positions
+            self.positions[symbol] = {}
+            self.positions[symbol]['symbol'] = symbol
+            self.positions[symbol]['quantity'] = quantity
+            self.positions[symbol]['purchase_price'] = purchase_price
+            self.positions[symbol]['purchase_date'] = purchase_date
+            self.positions[symbol]['cost_basis'] = quantity * purchase_price
+            self.positions[symbol]['asset_type'] = asset_type
+
+
+            if purchase_date:
+                self.positions[symbol]['ownership_status'] = True
+            else:
+                self.positions[symbol]['ownership_status'] = False
+
+            # also add the security to the position lots
+            self.position_lots[symbol] = []
+            position_lot = {}
+            position_lot['quantity'] = quantity
+            position_lot['purchase_price'] = purchase_price
+            position_lot['purchase_date'] = purchase_date
+            position_lot['cost_basis'] = quantity * purchase_price
+            position_lot['asset_type'] = asset_type
+            position_lot['indicator_used'] = indicator_used
+            self.position_lots[symbol].append(position_lot)
 
         return self.positions[symbol]
 
+    def check_portfolio_indicators(self, indicator: str=None, symbol: str=None):
+        """Returns the set of all indicators currently in use in all
+        position_lots in the portfolio. If indicator given, returns True if it
+        has been used to purchase shares in the active portfolio.
+
+        If symbol given and no indicator, returns a set of all indicators
+        for the position_lots of that security. Returns True if the indicator is
+        given and found in security's position_lots.
+        """
+        
+        if not self.positions and not self.position_lots:
+            return None
+        
+        if not symbol:
+            all_indicators = []
+            for ticker, lots in self.position_lots.items():
+                ticker_indicators = [all_indicators.append(lot['indicator_used']) for lot in lots]
+                # all_indicators.append(symbol_indicators)
+            indicators = set(all_indicators)
+        else:
+            indicators = None
+            if symbol in self.position_lots.keys():
+                indicators = set([lot['indicator_used'] for lot in self.position_lots[symbol]])
+
+        return indicator in indicators if indicator else indicators
+    
     def remove_position(self, symbol: str) -> Tuple[bool, str]:
         """Deletes a single position from the portfolio.
 
@@ -197,24 +266,52 @@ class Portfolio():
 
         if symbol in self.positions:
             del self.positions[symbol]
+            if symbol in self.position_lots:
+                del self.position_lots[symbol]
             return (True, "{symbol} was successfully removed.".format(symbol=symbol))
         else:
             return (False, "{symbol} did not exist in the porfolio.".format(symbol=symbol))
+    
+    def update_metrics(self):
+        """Updates the returns for each position and the overall portfolio"""
+        
+        self._total_return = self.total_return
+        self._profit_loss = self.profit_loss
+        self._invested_capital = self.invested_capital
+
+        self.total_return = 0
+        self.profit_loss = 0
+        self.invested_capital = 0
+        
+        for symbol in self.positions:
+            current_price = self.positions[symbol]['current_price']
+            for lot in self.position_lots[symbol]:
+                lot['total_return_$'] = (current_price - lot['cost_basis'])
+                lot['total_return_%'] = round((lot['gross_return_$'] / lot['cost_basis']), 4)
+                # lot['annualized_return_%'] = round((lot['gross_return_$'] / lot['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+
+            self.positions[symbol]['total_return_$'] = sum([lot['gross_return_$'] for lot in self.position_lots[symbol]])
+            self.positions[symbol]['total_return_%'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']), 4)
+            # self.positions[symbol]['annualized_return_%'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+        
+
+
 
     def total_allocation(self) -> dict:
         """Returns a summary of the portfolio by asset allocation."""
 
         total_allocation = {
-            'stocks': [],
+            'equity': [],
             'fixed_income': [],
             'options': [],
             'futures': [],
-            'furex': []
+            'forex': []
         }
 
         if len(self.positions.keys()) > 0:
             for symbol in self.positions:
                 total_allocation[self.positions[symbol]['asset_type']].append(self.positions[symbol])
+            return total_allocation
 
     def portfolio_variance(self, weights: dict, covariance_matrix: DataFrame) -> dict:
 
@@ -229,7 +326,7 @@ class Portfolio():
 
         return portfolio_variance
 
-    def portfolio_metrics(self) -> dict:
+    def update_risk_metrics(self) -> dict:
         """Calculates different portfolio risk metrics using daily data.
 
         Overview:
@@ -319,11 +416,7 @@ class Portfolio():
         """
 
         weights = {}
-
-        # First grab all the symbols.
         symbols = self.positions.keys()
-
-        # Grab the quotes.
         quotes = self.td_client.get_quotes(instruments=list(symbols))
 
         # Grab the projected market value.
@@ -331,10 +424,8 @@ class Portfolio():
             current_prices=quotes
         )
 
-        # Loop through each symbol.
+        # Calc the weights
         for symbol in projected_market_value_dict:
-
-            # Calculate the weights.
             if symbol != 'total':
                 weights[symbol] = projected_market_value_dict[symbol]['total_market_value'] / \
                     projected_market_value_dict['total']['total_market_value']
@@ -382,10 +473,7 @@ class Portfolio():
                 True
         """
 
-        if symbol in self.positions:
-            return True
-        else:
-            return False
+        return symbol in self.positions
 
     def get_ownership_status(self, symbol: str) -> bool:
         """Gets the ownership status for a position in the portfolio.
@@ -404,7 +492,7 @@ class Portfolio():
         else:
             return False
 
-    def set_ownership_status(self, symbol: str, ownership: bool) -> None:
+    def set_ownership_status(self, symbol: str, ownership: bool=None) -> None:
         """Sets the ownership status for a position in the portfolio.
 
         Arguments:
@@ -419,11 +507,12 @@ class Portfolio():
         KeyError: If the symbol does not exist in the portfolio it will return an error.
         """
 
-        if self.in_portfolio(symbol=symbol):
-            self.positions[symbol]['ownership_status'] = ownership
-        else:
+        try:
+            self.positions[symbol]['ownership_status'] = self.in_portfolio(symbol) and \
+                                                         self.positions[symbol]['quantity'] != 0
+        except KeyError:
             raise KeyError(
-                "Can't set ownership status, as you do not have the symbol in your portfolio."
+                "Can't set ownership status, you either do not have the symbol in your portfolio or no invested shares."
             )
 
     def is_profitable(self, symbol: str, current_price: float) -> bool:
@@ -467,10 +556,7 @@ class Portfolio():
         else:
             raise KeyError("The Symbol you tried to request does not exist.")
 
-        if (purchase_price <= current_price):
-            return True
-        elif (purchase_price > current_price):
-            return False
+        return purchase_price <= current_price
 
     def projected_market_value(self, current_prices: dict) -> dict:
         """Returns the Projected market value for all the positions in the portfolio.
@@ -507,20 +593,18 @@ class Portfolio():
         position_count_break_even = 0
 
         for symbol in current_prices:
-
             if self.in_portfolio(symbol=symbol):
-
                 projected_value[symbol] = {}
                 current_quantity = self.positions[symbol]['quantity']
                 purchase_price = self.positions[symbol]['purchase_price']
-                current_price = current_prices[symbol]['lastPrice']
-                is_profitable = self.is_profitable(
-                    symbol=symbol, current_price=current_price)
+                try:
+                    current_price = current_prices[symbol]['lastPrice']
+                except KeyError:
+                    current_price = current_prices[symbol]['close']
 
                 projected_value[symbol]['purchase_price'] = purchase_price
-                projected_value[symbol]['current_price'] = current_prices[symbol]['lastPrice']
+                projected_value[symbol]['current_price'] = current_price
                 projected_value[symbol]['quantity'] = current_quantity
-                projected_value[symbol]['is_profitable'] = is_profitable
 
                 # Calculate total market value.
                 projected_value[symbol]['total_market_value'] = (
@@ -534,6 +618,7 @@ class Portfolio():
 
                 projected_value[symbol]['total_loss_or_gain_$'] = ((current_price - purchase_price) * current_quantity)
                 projected_value[symbol]['total_loss_or_gain_%'] = round(((current_price - purchase_price) / purchase_price), 4)
+                projected_value[symbol]['annualized_return_%'] = round(((current_price - purchase_price) / purchase_price) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
 
                 total_value += projected_value[symbol]['total_market_value']
                 total_profit_or_loss += projected_value[symbol]['total_loss_or_gain_$']
@@ -554,6 +639,11 @@ class Portfolio():
         projected_value['total']['number_of_profitable_positions'] = position_count_profitable
         projected_value['total']['number_of_non_profitable_positions'] = position_count_not_profitable
         projected_value['total']['number_of_breakeven_positions'] = position_count_break_even
+
+        self.market_value = total_value
+        self.invested_capital = total_invested_capital
+        self.profit_loss = total_profit_or_loss
+        # self.total_return = round(((total_value - total_invested_capital) / total_invested_capital), 4)
 
         return projected_value
 
@@ -664,3 +754,8 @@ class Portfolio():
         self._stock_frame_daily.create_frame()
 
         return self._stock_frame_daily
+
+
+# s = 'happy is friday everyone that is awesome how we doing happy how'
+# test_set = set([i for i in s.split()])
+# print('happy' in test_set)

@@ -65,8 +65,8 @@ class Indicators():
         else:
             return self._indicator_signals
     
-    def set_indicator_signal(self, indicator: str, buy: float, sell: float, condition_buy: Any, condition_sell: Any, 
-                             buy_max: float = None, sell_max: float = None, condition_buy_max: Any = None, condition_sell_max: Any = None) -> None:
+    def set_indicator_signal(self, indicator: str, buy: float, sell: float, condition_buy: Any, condition_sell: Any, buy_max: float = None, 
+                             sell_max: float = None, condition_buy_max: Any = None, condition_sell_max: Any = None) -> None:
         """Used to set an indicator where one indicator crosses above or below a certain numerical threshold.
 
         Arguments:
@@ -112,7 +112,7 @@ class Indicators():
         self._indicator_signals[indicator]['sell_max'] = sell_max
         self._indicator_signals[indicator]['buy_operator_max'] = condition_buy_max
         self._indicator_signals[indicator]['sell_operator_max'] = condition_sell_max
-
+    
     def set_indicator_signal_compare(self, indicator_1: str, indicator_2: str, condition_buy: Any, condition_sell: Any) -> None:
         """Used to set an indicator where one indicator is compared to another indicator.
 
@@ -220,14 +220,18 @@ class Indicators():
             lambda x: x.diff()                                                 # finally, calculate the actual change in close price
         )
 
+        self._frame['log_change_in_price'] = self._price_groups['close'].apply(np.log).diff(1)
+
         return self._frame
 
-    def st_decline(self, period: int, column_name: str = 'st_decline') -> pd.DataFrame:
+    def discount_ratio(self, period: int, discounts: list, interval: float = 0.10, column_name: str = 'discount_ratio') -> pd.DataFrame:
         """Calculates the % decline the current price represents from the max
         price over the previous period days
 
-        Returns float in range 0 (close price == period max) to 1.00 (close
-        price == 100% decline from period max)
+        discounts: list of floats from 0.00 to 1.00, each representing a
+        discount threshold from the max period price
+        interval: the discount range between which each indicator will produce a
+        signal
         """
 
         locals_data = locals()
@@ -235,17 +239,28 @@ class Indicators():
 
         self._current_indicators[column_name] = {}
         self._current_indicators[column_name]['args'] = locals_data
-        self._current_indicators[column_name]['func'] = self.st_decline
+        self._current_indicators[column_name]['func'] = self.discount_ratio
         
         self._frame['period_max'] = self._price_groups['close'].transform(
             lambda x: x.rolling(window=period).max()
         )
 
-        self._frame['st_decline'] = 1 - abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
+        self._frame['discount_ratio'] = 1 - abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
+        
+        for discount in discounts:
+            col = f'discount_ratio_{str(int(discount*100))}'
+            self._frame[col] = np.where((self._frame['discount_ratio'] <= discount) & \
+                                        (self._frame['discount_ratio'] > (discount - interval)), 1, -1)
+        self._frame.dropna(inplace=True)
         return self._frame
 
-    def ext_period_ratio(self, extended_period: int, column_name: str = 'ext_period_ratio') -> pd.DataFrame:
-        """Calculates the ratio of current price to max price over the extended_period
+    def close_to_avg_ratio(self, period: int, premium: float = 1.20, column_name: str = 'close_to_avg_ratio') -> pd.DataFrame:
+        """Calculates the ratio of current price to the avg close price over the
+        period
+
+        period: the num of days to track premium: the pct above period avg when
+        to buy
+
         """
 
         locals_data = locals()
@@ -253,13 +268,16 @@ class Indicators():
 
         self._current_indicators[column_name] = {}
         self._current_indicators[column_name]['args'] = locals_data
-        self._current_indicators[column_name]['func'] = self.ext_period_ratio
+        self._current_indicators[column_name]['func'] = self.close_to_avg_ratio
         
-        self._frame['ext_period_max'] = self._price_groups['close'].transform(
-            lambda x: x.rolling(window=extended_period).max()
+        self._frame['period_avg'] = self._price_groups['close'].transform(
+            lambda x: x.rolling(window=period).mean()
         )
 
-        self._frame['ext_period_ratio'] = self._frame['close'] / self._frame['ext_period_max']
+        self._frame['close_to_avg_ratio'] = self._frame['close'] / self._frame['period_avg']
+        col = f'close_to_avg_{str(int(premium*100))}'
+        self._frame[col] = np.where(self._frame['close_to_avg_ratio'] >= premium, 1, -1)
+        self._frame.dropna(inplace=True)
         return self._frame
 
     
@@ -1078,13 +1096,13 @@ class Indicators():
 
         signals_df = self._stock_frame._check_signals(
             indicators=self._indicator_signals,
-            indciators_comp_key=self._indicators_comp_key,
+            indicators_comp_key=self._indicators_comp_key,
             indicators_key=self._indicators_key
         )
 
         return signals_df
 
-    def check_current_signals(self, bar) -> Union[pd.DataFrame, None]:
+    def check_current_signals(self, bar, locked_indicators: set = None) -> Union[pd.DataFrame, None]:
         """Checks to see if any signals have been generated.
 
         Returns:
@@ -1096,8 +1114,9 @@ class Indicators():
         signals_df = self._stock_frame._check_current_signals(
             bar=bar,
             indicators=self._indicator_signals,
-            indciators_comp_key=self._indicators_comp_key,
-            indicators_key=self._indicators_key
+            indicators_comp_key=self._indicators_comp_key,
+            indicators_key=self._indicators_key,
+            locked_indicators=locked_indicators
         )
 
         return signals_df

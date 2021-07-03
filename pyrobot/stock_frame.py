@@ -221,7 +221,26 @@ class StockFrame():
                     self._frame.columns)
             ))
 
-    def _check_current_signals(self, bar, indicators: dict, indciators_comp_key: List[str], indicators_key: List[str]):
+    def _check_current_signals(self, bar, indicators: dict, indicators_comp_key: List[str], indicators_key: List[str], locked_indicators: set = None):
+        """
+        
+        indicators {dict} -- A dictionary containing all the indicators to be checked
+        along with their buy and sell criteria.
+
+        indicators_comp_key List[str] -- A list of the indicators where we are comparing
+        one indicator to another indicator.
+
+        indicators_key List[str] -- A list of the indicators where we are comparing
+        one indicator to a numerical value.
+        """
+        
+        # print(f'indicators: {indicators}')
+        # print(f'indicators_key: {indicators_key}')
+        # print()
+        
+        # print(self.do_indicator_exist(column_names=indicators_key))
+        # print()
+
         # Grab the current row
         last_rows = bar
 
@@ -230,13 +249,25 @@ class StockFrame():
 
         # Check to see if all the columns exist.
         if self.do_indicator_exist(column_names=indicators_key):
-
+            
+            # eval each indicator for signal
             for indicator in indicators_key:
-
+                # print(conditions)
+                
+                
+                if locked_indicators and indicator in locked_indicators:
+                    continue
+                
                 column = last_rows[indicator]
-                if isinstance(column, (str, bool, float, int)):
-                    column = pd.Series([column])
+                # if isinstance(column, (str, bool, float, int)):
+                #     # column = pd.DataFrame([column])
+                #     column = pd.Series([column])
 
+                # print()
+                # print(f'{indicator}   <-- indicator')
+                # print(f'{column}   <-- column')
+                # print(type(column))
+                
                 # Grab the Buy & Sell Condition.
                 buy_condition_target = indicators[indicator]['buy']
                 sell_condition_target = indicators[indicator]['sell']
@@ -247,32 +278,46 @@ class StockFrame():
                 condition_1: pd.Series = buy_condition_operator(
                     column, buy_condition_target
                 )
+                
                 condition_2: pd.Series = sell_condition_operator(
                     column, sell_condition_target
                 )
 
-                # if len(indicators_key) == 1:
-                #     condition_1 = condition_1 if condition_1 == True else None
-                #     condition_2 = condition_2 if condition_2 == True else None
-
-                # else:
                 condition_1 = condition_1.where(lambda x: x == True).dropna()
                 condition_2 = condition_2.where(lambda x: x == True).dropna()
 
-                conditions['buys'] = condition_1
-                conditions['sells'] = condition_2
+                if not conditions:
+                    conditions['buys'] = condition_1
+                    conditions['sells'] = condition_2
+
+                else:
+                    if not condition_1.empty:
+                        buys_keys = conditions['buys'].keys().append(condition_1.name)
+                        conditions['buys'] = pd.concat([conditions['buys'], condition_1], keys=buys_keys)
+                    if not condition_2.empty:
+                        sells_keys = conditions['sells'].keys().append(condition_2.name)
+                        conditions['sells'] = pd.concat([conditions['sells'], condition_2], keys=sells_keys)
+
+                # print(condition_1.name)
+                # print(condition_2.name)
+                
+                # if not condition_1.empty:
+                #     conditions['buys'][indicator] = condition_1
+                # if not condition_2.empty:
+                #     conditions['sells'][indicator] = condition_2
         
         # Store the indicators in a list.
         check_indicators = []
         
         # Split the name so we can check if the indicator exist.
-        for indicator in indciators_comp_key:
+        for indicator in indicators_comp_key:
             parts = indicator.split('_comp_')
             check_indicators += parts
 
         if self.do_indicator_exist(column_names=check_indicators):
-
-            for indicator in indciators_comp_key:
+            for indicator in indicators_comp_key:
+                if indicator in locked_indicators:
+                    continue
                 
                 # Split the indicators.
                 parts = indicator.split('_comp_')
@@ -318,7 +363,7 @@ class StockFrame():
         return conditions
 
     
-    def _check_signals(self, indicators: dict, indciators_comp_key: List[str], indicators_key: List[str]) -> Union[pd.DataFrame, None]:
+    def _check_signals(self, indicators: dict, indicators_comp_key: List[str], indicators_key: List[str]) -> Union[pd.DataFrame, None]:
         """Returns the last row of the StockFrame if conditions are met.
 
         Overview:
@@ -356,9 +401,7 @@ class StockFrame():
 
         # Check to see if all the columns exist.
         if self.do_indicator_exist(column_names=indicators_key):
-
             for indicator in indicators_key:
-
                 column = last_rows[indicator]
 
                 # Grab the Buy & Sell Condition.
@@ -385,13 +428,13 @@ class StockFrame():
         check_indicators = []
         
         # Split the name so we can check if the indicator exist.
-        for indicator in indciators_comp_key:
+        for indicator in indicators_comp_key:
             parts = indicator.split('_comp_')
             check_indicators += parts
 
         if self.do_indicator_exist(column_names=check_indicators):
 
-            for indicator in indciators_comp_key:
+            for indicator in indicators_comp_key:
                 
                 # Split the indicators.
                 parts = indicator.split('_comp_')
