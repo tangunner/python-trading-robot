@@ -34,6 +34,7 @@ class Portfolio():
         self.account_number = account_number
 
         self._historical_prices = []
+        self.performance_tracker = {}
 
         self._td_client: TDClient = None
         self._stock_frame: StockFrame = None
@@ -272,45 +273,77 @@ class Portfolio():
         else:
             return (False, "{symbol} did not exist in the porfolio.".format(symbol=symbol))
     
-    def update_metrics(self, current_prices: dict):
-        """Updates the returns for each position and the overall portfolio"""
+    def get_performance_tracker(self, totals_only=False):
+        """Returns the performance_tracker dict"""
         
-        self._total_return = self.total_return
-        self._profit_loss = self.profit_loss
-        self._invested_capital = self.invested_capital
-
-        self.total_return = 0
-        self.profit_loss = 0
-        self.invested_capital = 0
+        if not self.performance_tracker:
+            raise AttributeError('Must create performance tracker before calling.')
         
-        for symbol in self.positions:
-            try:
-                current_price = self.positions[symbol]['current_price']
-            except KeyError:
-                current_price
+        tracker = self.performance_tracker
+        
+        # if we only want the 'total' portfolio metrics
+        if totals_only:
+            tracker = {}
             
-            for lot in self.position_lots[symbol]:
-                lot['profit_loss'] = (current_price - lot['cost_basis'])
-                lot['total_return'] = round((lot['gross_return_$'] / lot['cost_basis']), 4)
-                # lot['annualized_return'] = round((lot['gross_return_$'] / lot['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
-
-            self.positions[symbol]['profit_loss'] = sum([lot['gross_return_$'] for lot in self.position_lots[symbol]])
-            self.positions[symbol]['total_return'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']), 4)
-            # self.positions[symbol]['annualized_return'] = round((self.positions[symbol]['gross_return_$'] / self.positions[symbol]['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+            # reformat dict for making into a DF
+            for dt in self.performance_tracker:
+                tracker[dt] = {}
+                tracker[dt]['market_value'] = self.performance_tracker[dt]['total']['market_value']
+                tracker[dt]['invested_capital'] = self.performance_tracker[dt]['total']['invested_capital']
+                tracker[dt]['total_profit_or_loss'] = self.performance_tracker[dt]['total']['total_profit_or_loss']
+                tracker[dt]['total_return'] = self.performance_tracker[dt]['total']['total_return']
+                    
+        return tracker
+    
+    def update_metrics(self, current_prices, date=None):
+        """Updates the returns for each position and the overall portfolio and
+        stores them in the performance tracker
         
-        for symbol in current_prices:
-            if self.in_portfolio(symbol=symbol):
-                current_quantity = self.positions[symbol]['quantity']
-                purchase_price = self.positions[symbol]['purchase_price']
-                try:
-                    current_price = current_prices[symbol]['lastPrice']
-                except KeyError:
-                    current_price = current_prices[symbol]['close']
+        current_prices {Dict} -- dict of historical prices of the form
+        current_prices[symbol]['close'] = <value>
+        date {datetime} -- the date corresponding to the current_prices
+        """
+        
+        if not date:
+            date = datetime.today()
 
-                self.positions[symbol]['current_price'] = current_price
+        # if there are no positions in the portfolio yet
+        if current_prices == 0:
 
-                for lot in self.position_lots[symbol]:
-                    lot['market_value'] = lot['quantity'] * current_price
+            # add placeholders for each 'total' portfolio metric for that date 
+            self.performance_tracker[date] = {}
+            self.performance_tracker[date]['total'] = {}
+            self.performance_tracker[date]['total']['market_value'] = 1
+            self.performance_tracker[date]['total']['invested_capital'] = 0
+            self.performance_tracker[date]['total']['total_profit_or_loss'] = 0
+            self.performance_tracker[date]['total']['total_return'] = 0
+            self.performance_tracker[date]['total']['count_profitable_positions'] = 0
+            self.performance_tracker[date]['total']['count_non_profitable_positions'] = 0
+            self.performance_tracker[date]['total']['count_breakeven_positions'] = 0
+            
+            # # grab all of the non-null price vals already in the perf tracker
+            # prices = [
+            #     self.performance_tracker[key] for key in self.performance_tracker if self.performance_tracker[key]
+            # ]
+            
+            # if prices:
+            #     for key in prices[0]:
+            #         self.performance_tracker[date][key] = 1
+            # else:
+            #     self.performance_tracker[date]['market_value'] = 1
+        
+        # # if first call to update_metrics
+        # else:
+        #     self.performance_tracker[date] = {}
+        #     self.performance_tracker[date]['market_value'] = 1
+            return
+        
+        # calc the portfolio values for the timestep
+        portfolio_metrics = self.projected_market_value(current_prices, date)
+        
+        # add the updated values for the timestep to the performance tracker
+        self.performance_tracker[date] = portfolio_metrics
+        return portfolio_metrics
 
 
     def total_allocation(self) -> dict:
@@ -574,7 +607,7 @@ class Portfolio():
 
         return purchase_price <= current_price
 
-    def projected_market_value(self, current_prices: dict) -> dict:
+    def projected_market_value(self, current_prices: dict, date=None) -> dict:
         """Returns the Projected market value for all the positions in the portfolio.
 
         Arguments:
@@ -608,6 +641,9 @@ class Portfolio():
         position_count_not_profitable = 0
         position_count_break_even = 0
 
+        if not date:
+            date = datetime.today()
+
         for symbol in current_prices:
             if self.in_portfolio(symbol=symbol):
                 projected_value[symbol] = {}
@@ -625,7 +661,7 @@ class Portfolio():
                     lot['market_value'] = lot['quantity'] * current_price
                     lot['profit_loss'] = lot['market_value'] - lot['cost_basis']
                     lot['total_return'] = round((lot['profit_loss'] / lot['cost_basis']), 4)
-                    lot['annualized_return'] = round((lot['profit_loss'] / lot['cost_basis']) * (365 / (datetime.today() - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+                    lot['annualized_return'] = round((lot['profit_loss'] / lot['cost_basis']) * (365 / (date - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
                 
                 projected_value[symbol]['purchase_price'] = purchase_price
                 projected_value[symbol]['current_price'] = current_price
@@ -643,7 +679,7 @@ class Portfolio():
 
                 projected_value[symbol]['profit_loss'] = ((current_price - purchase_price) * current_quantity)
                 projected_value[symbol]['total_return'] = round(((current_price - purchase_price) / purchase_price), 4)
-                projected_value[symbol]['annualized_return'] = round(((current_price - purchase_price) / purchase_price) * (365 / (datetime.today() - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+                projected_value[symbol]['annualized_return'] = round(((current_price - purchase_price) / purchase_price) * (365 / (date - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
 
                 total_value += projected_value[symbol]['market_value']
                 total_profit_or_loss += projected_value[symbol]['profit_loss']
@@ -661,6 +697,7 @@ class Portfolio():
         projected_value['total']['market_value'] = total_value
         projected_value['total']['invested_capital'] = invested_capital
         projected_value['total']['total_profit_or_loss'] = total_profit_or_loss
+        projected_value['total']['total_return'] = round((total_profit_or_loss / invested_capital), 4)
         projected_value['total']['count_profitable_positions'] = position_count_profitable
         projected_value['total']['count_non_profitable_positions'] = position_count_not_profitable
         projected_value['total']['count_breakeven_positions'] = position_count_break_even
@@ -668,10 +705,91 @@ class Portfolio():
         self.market_value = total_value
         self.invested_capital = invested_capital
         self.profit_loss = total_profit_or_loss
-        self.total_return = round(((total_value - invested_capital) / invested_capital), 4)
-
+        self.total_return = projected_value['total']['total_return']
         return projected_value
 
+    def get_portfolio_max_drawdown(self, window: int=252):
+        """Calcs the max drawdown for the given benchmark index.
+
+        window -- the size of the rolling period to use to calc min/max
+        drawdown; note there are 252 trading days in a year, so if you want a
+        window of 2, 3, 4,... years the window will be 504, 756, 1008,... days
+        
+        """
+
+        if not self.performance_tracker:
+            raise AttributeError('Must create performance tracker before calc max drawdown.')
+
+        total_performance_tracker = self.get_performance_tracker(totals_only=True)
+        
+        df = DataFrame.from_dict(total_performance_tracker, orient='index')
+        
+        # calc daily drawdown using the max market val over 'window' days
+        rolling_max_mv = df['market_value'].rolling(window=window, min_periods=1).max()
+        
+        # subtract 1 to make DD negative
+        daily_drawdown = df['market_value'] / rolling_max_mv - 1.0
+
+        # then calc max drawdown as min of daily drawdowns over 'window' days
+        daily_max_drawdown = daily_drawdown.rolling(window, min_periods=1).min()
+        return min(daily_max_drawdown)
+
+    def get_max_drawdown(self, tracker: dict, keys: str, print_stuff=True):
+        """My original method fo calculating the max drawdown [DELETE?]"""
+
+        display_min_vals = {}
+        display_min_val_dates = {}
+        display_max_prior_vals = {}
+        display_max_prior_vals_dates = {}
+        display_min_portfolio_mv = {}
+        display_max_prior_portfolio_mv = {}
+        display_max_drawdowns = {}
+        
+        daily_portfolio_mvs = [(dt, tracker[dt]['total']['market_value']) for dt in tracker if isinstance(tracker[dt], dict)]
+        
+        for key in keys:
+            daily_portfolio_vals = [(dt, tracker[dt]['total'][key]) for dt in tracker if isinstance(tracker[dt], dict)]
+            min_portfolio_val = min([x[1] for x in daily_portfolio_vals])
+            min_portfolio_val_date = [x[0] for x in daily_portfolio_vals if x[1] == min_portfolio_val][0]
+            
+            prior_daily_portfolio_vals = [tup for tup in daily_portfolio_vals if tup[0] < min_portfolio_val_date]
+            max_prior_portfolio_val = max([tup[1] for tup in prior_daily_portfolio_vals])
+            max_prior_portfolio_val_date = [tup[0] for tup in prior_daily_portfolio_vals if tup[1] == max_prior_portfolio_val][0]
+            
+            min_portfolio_mv = [x[1] for x in daily_portfolio_mvs if x[0] == min_portfolio_val_date][0]
+            max_prior_portfolio_mv = [x[1] for x in daily_portfolio_mvs if x[0] == max_prior_portfolio_val_date][0]
+            
+            max_drawdown = round((min_portfolio_mv - max_prior_portfolio_mv) / max_prior_portfolio_mv, 4)
+            
+            display_min_vals[f'min_val_(key={key})'] = min_portfolio_val
+            display_min_val_dates[f'date_min_val_(key={key})'] = min_portfolio_val_date
+            display_max_prior_vals[f'max_prior_val_(key={key})'] = max_prior_portfolio_val
+            display_max_prior_vals_dates[f'date_max_prior_val_(key={key})'] = max_prior_portfolio_val_date
+            display_min_portfolio_mv[f'min_mv_(key={key})'] = min_portfolio_mv
+            display_max_prior_portfolio_mv[f'max_prior_mv_(key={key})'] = max_prior_portfolio_mv
+            display_max_drawdowns[f'max_drawdown_(key={key})'] = max_drawdown
+
+        if print_stuff:
+            print('--'*50)
+            [print(f'{min_val}: {display_min_vals[min_val]}') for min_val in display_min_vals]
+            print()
+            [print(f'{min_val_date}: {display_min_val_dates[min_val_date]}') for min_val_date in display_min_val_dates]
+            print()
+            [print(f'{max_val}: {display_max_prior_vals[max_val]}') for max_val in display_max_prior_vals]
+            print()
+            [print(f'{max_val_date}: {display_max_prior_vals_dates[max_val_date]}') for max_val_date in display_max_prior_vals_dates]
+            print()
+            [print(f'{min_mv}: {display_min_portfolio_mv[min_mv]}') for min_mv in display_min_portfolio_mv]
+            print()
+            [print(f'{max_mv}: {display_max_prior_portfolio_mv[max_mv]}') for max_mv in display_max_prior_portfolio_mv]
+            print()
+            [print(f'{drawdown}: {display_max_drawdowns[drawdown]}') for drawdown in display_max_drawdowns]
+            print('--'*50)
+
+        all_drawdowns = [display_max_drawdowns[d] for d in display_max_drawdowns]
+        max_drawdown = max(set(all_drawdowns), key = all_drawdowns.count)
+        return max_drawdown
+    
     @property
     def historical_prices(self) -> List[dict]:
         """Gets the historical prices for the Portfolio
@@ -739,11 +857,13 @@ class Portfolio():
         self._td_client: TDClient = td_client
 
     def _grab_daily_historical_prices(self) -> StockFrame:
-        """Grabs the daily historical prices for each position.
+        """Grabs the daily historical prices for each position and sets the daily
+        stock frame, which is multi indexed by symbol and datetime
 
         Returns:
         ----
-        {StockFrame} -- A StockFrame object with data organized, grouped, and sorted.
+        {StockFrame} -- A StockFrame object with data organized, grouped, and
+        sorted.
         """
 
         new_prices = []

@@ -22,8 +22,8 @@ class StockFrame():
 
         self._data = data
         self._frame: pd.DataFrame = self.create_frame()
-        self._symbol_groups = None
-        self._symbol_rolling_groups = None
+        self._symbol_groups: DataFrameGroupBy = None
+        self._symbol_rolling_groups: RollingGroupby = None
 
     @property
     def frame(self) -> pd.DataFrame:
@@ -89,7 +89,6 @@ class StockFrame():
         {pd.DataFrame} -- A pandas dataframe.
         """
 
-        # Make a data frame.
         price_df = pd.DataFrame(data=self._data)
         price_df = self._parse_datetime_column(price_df=price_df)
         price_df = self._set_multi_index(price_df=price_df)
@@ -130,7 +129,6 @@ class StockFrame():
         """
 
         price_df = price_df.set_index(keys=['symbol', 'datetime'])
-
         return price_df
 
     def add_rows(self, data: Dict) -> None:

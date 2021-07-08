@@ -1,6 +1,8 @@
 import os
 import sys
 
+from numpy.lib import math
+
 currentdir = f"{str(os.getcwd())}\\python-trading-robot"
 parentdir = os.path.dirname(currentdir)
 if currentdir not in sys.path:
@@ -36,6 +38,7 @@ CREDENTIALS_PATH = config.get('main', 'JSON_PATH')
 ACCOUNT_NUMBER = config.get('main', 'ACCOUNT_NUMBER')
 
 symbol = 'SPY'
+benchmark = 'SPY'
 paper_trading = True
 backtesting = True
 
@@ -58,7 +61,8 @@ class PaperTradingAccount(object):
         self.useRealCashBal = False
         self.minCashThreshold = 0.20
         self.minCash = self.cash * self.minCashThreshold
-        self.txCosts = 0.01
+        self.priceSlippage = 0.01
+        self.txCosts = 0.0
         self.STCapGainTax = 0.20                  # ST tax = personal tax rate
         self.LTCapGainTax = 0.15                  # LT tax typically 15%
         self.backtestEndDate = datetime.today()
@@ -152,6 +156,10 @@ enter_spy = trading_robot.create_trade(
 #     order_type='mkt'
 # )
 
+# trades_dict = {}
+# for symbol in symbols:
+#     trades_dict[symbol]
+
 trades_dict = {
     symbol: {
         'buy': {
@@ -174,12 +182,16 @@ account.getUpdatedMinCash(trading_robot)
 # iter over all the dates in the historical data
 for idx, bar in indicator_client._frame.groupby(level=1):
     date = bar.index[0][1]
+    current_prices = 0
 
     # update and store the portfolio market values
     if trading_robot.portfolio.positions:
         current_prices = {}
         for symbol in trading_robot.portfolio.positions:
-            current_prices[symbol] = historical_prices[symbol]['candles'][-1]
+            current_prices[symbol] = {}
+            current_prices[symbol]['close'] = bar['close'].item()
+    
+    trading_robot.portfolio.update_metrics(current_prices, date)
 
     # grab the indicators that were used to buy or sell current shares
     locked_indicators = trading_robot.portfolio.check_portfolio_indicators(symbol=bar.index[0][0])
@@ -234,7 +246,7 @@ for idx, bar in indicator_client._frame.groupby(level=1):
         price = bar['close'].item()
         disc_ratio = bar['discount_ratio'].item()
         quantity = int(account.lotSizing / price)
-        cost_basis = quantity * price
+        cost_basis = price * quantity
 
         # if any securities in the port, update min cash using MV + cash
         if trading_robot.portfolio.positions:
@@ -246,16 +258,19 @@ for idx, bar in indicator_client._frame.groupby(level=1):
             # adj quantity if cost dips into min cash balance
             if ((account.cash - cost_basis) < account.minCash):
                 quantity = int((account.cash - account.minCash) / price)
-                cost_basis = quantity * price
         
         # do nothing if we can't afford more shares
         if not quantity:
             logging.info(f'{date} -- {symbol} Skipped Buy Flag (discount_ratio = {disc_ratio}): cash = ${account.cash}')
             continue
-        
+
+        # For papertrading, adj purchase price to allow for slippage
+        if paper_trading:
+            slippage = account.priceSlippage * price
+            price = price + slippage
+
+        cost_basis = price * quantity
         account.cash -= cost_basis
-        account.cash -= account.txCosts*cost_basis
-        print(f'tx_costs: {account.txCosts*cost_basis}')
         
         # Add order leg
         enter_spy.instrument(
@@ -286,7 +301,7 @@ for idx, bar in indicator_client._frame.groupby(level=1):
 
     else:
         # logging.info(f'{bar.index[0][1]} -- No signals')
-        print(f'{bar.index[0][1]} -- No signals')
+        # print(f'{bar.index[0][1]} -- No signals')
         continue
 
     # Execute Trades.
@@ -297,65 +312,76 @@ for idx, bar in indicator_client._frame.groupby(level=1):
     
     logging.info(f'Signals executed.')
 
-# # logging.info(f'Loop completed. (Time for full loop: {datetime.now() - beg_loop})')
-
 
 """
 Calculate Strategy's Returns
 """
 
-if not trading_robot.portfolio.positions:
-    current_mv = account.cash
-
 market_open_flag = trading_robot.regular_market_open
 
-# if market closed, use last close price as current price
 if market_open_flag:
     current_prices = trading_robot.grab_current_quotes()
 else:
+    # if market closed, use last close price as current price
     current_prices = {}
     try:
         for symbol in trading_robot.portfolio.positions:
-            current_prices[symbol] = trading_robot.portfolio.positions[symbol]['current_price']
+            current_prices[symbol] = {}
+            current_prices[symbol]['close'] = trading_robot.portfolio.positions[symbol]['current_price']
     except KeyError:
+        last_prices = trading_robot.get_latest_bar()
         for symbol in trading_robot.portfolio.positions:
-            current_prices[symbol] = historical_prices[symbol]['candles'][-1]
+            current_prices[symbol] = {}
+            current_prices[symbol]['close'] = [
+                p['close'] for p in last_prices if p['symbol'] == symbol
+            ][0]
 
-proj_val = trading_robot.portfolio.projected_market_value(current_prices)
-port_value = proj_val['total']['market_value']
-inv_cap = proj_val['total']['invested_capital']
+# add the current prices to the portfolio performance tracker
+trading_robot.portfolio.update_metrics(current_prices, date)
 
-print(f'SUMMARY RETURNS')
-print('--'*25)
-print('Market Value:', trading_robot.portfolio.market_value)
-print('Invested Capital:', trading_robot.portfolio.invested_capital)
-print('Profit Loss:', trading_robot.portfolio.profit_loss)
-print('Max Drawdown:')
-print('Total Return:', trading_robot.portfolio.total_return)
-ann_return = round((trading_robot.portfolio.total_return * (365 / (account.backtestEndDate - account.backtestStartDate).days)), 4)
-print('Annualized Return:', ann_return)
-print()
-print(f'BENCHMARK ({symbol}) RETURNS')
+# # calc the portfolio max drawdown
+# max_drawdown = trading_robot.portfolio.get_max_drawdown(
+#     tracker=tracker, keys=['total_profit_or_loss', 'market_value', 'total_return'], print_stuff=False
+# )
+
+max_drawdown = trading_robot.portfolio.get_portfolio_max_drawdown(window=252)
+
+# grab historical prices for the benchmark and calc its max drawdown
+benchmark_historical_prices = trading_robot.grab_historical_prices(
+    period_type='year',
+    period=2,
+    frequency=1,
+    frequency_type='daily',
+    symbols=[benchmark]
+)
+benchmark_max_drawdown = trading_robot.get_benchmark_max_drawdown(
+    prices_data=benchmark_historical_prices['aggregated'], window=252
+)
+
+print(f'max_drawdown: {max_drawdown}')
+print(f'benchmark_max_drawdown: {benchmark_max_drawdown}')
+
+logging.info('--'*50)
+logging.info(f'STRATEGY RETURNS')
+logging.info(f'Market Value: {trading_robot.portfolio.market_value}')
+logging.info(f'Invested Capital: {trading_robot.portfolio.invested_capital}')
+logging.info(f'Profit Loss: {trading_robot.portfolio.profit_loss}')
+logging.info(f'Max Drawdown: {max_drawdown}')
+logging.info(f'Total Return: {trading_robot.portfolio.total_return}')
+ann_return = round(trading_robot.portfolio.total_return * (365 / timedelta(milliseconds=(account.backtestEndDate - account.backtestStartDate)).days), 4)
+logging.info(f'Annualized Return: {ann_return}')
+logging.info(' ')
+logging.info(f'BENCHMARK ({symbol}) RETURNS')
 spy_tot_return = round(((historical_prices['aggregated'][-1]['close'] - historical_prices['aggregated'][0]['close']) / historical_prices['aggregated'][0]['close']), 4)
-spy_ann_return = round((spy_tot_return * (365 / (account.backtestEndDate - account.backtestStartDate).days)), 4)
-print('Max Drawdown:')
-print('Total Return:', spy_tot_return)
-print('Annualized Return:', spy_ann_return)
-print()
-print('Strategy Alpha:', (ann_return - spy_ann_return))
-print('--'*40)
+spy_ann_return = round(spy_tot_return * (365 / timedelta(milliseconds=(account.backtestEndDate - account.backtestStartDate)).days), 4)
+logging.info(f'Max Drawdown: {benchmark_max_drawdown}')
+logging.info(f'Total Return: {spy_tot_return}')
+logging.info(f'Annualized Return: {spy_ann_return}')
+logging.info(' ')
+logging.info(f'Strategy Alpha: {(ann_return - spy_ann_return)}')
+logging.info('--'*50)
 
 
-# port_return_incl_cash = round(((port_value + account.cash - 100000) / (100000)), 4)
-# port_return_excl_cash = round(((port_value - inv_cap) / inv_cap), 4)
-# print('port_return_incl_cash', port_return_incl_cash)
-# print('port_return_excl_cash', port_return_excl_cash)
-# print('--'*40)
-
-# logging.info('--'*25)
-# logging.info(f'Portfolio return (excl cash): {port_return_excl_cash}')
-# logging.info(f'Portfolio return (incl cash): {port_return_incl_cash}')
-# logging.info('--'*50)
 
 # while True:
 

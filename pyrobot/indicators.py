@@ -38,8 +38,8 @@ class Indicators():
 
         self._stock_frame: StockFrame = price_data_frame             # StockFrame obj
         self._price_groups = self._stock_frame.symbol_groups         # DataFrame Groupby obj, grouped by symbol
-        self._current_indicators = {}
-        self._indicator_signals = {}
+        self._current_indicators = {}                                # Stores the args and the func obj for each indicator; these are called from refresh method
+        self._indicator_signals = {}                                 # Stores the buy/sell signal thresholds for each indicator
         self._frame = self._stock_frame.frame                        # DataFrame obj
 
         self._indicators_comp_key = []

@@ -592,6 +592,7 @@ class PyRobot():
                 )
 
             except:
+                # pause if too many requests made back-to-back
                 time_true.sleep(2)
                 historical_prices_response = self.session.get_price_history(
                     symbol=symbol,
@@ -617,6 +618,27 @@ class PyRobot():
 
         return latest_prices
 
+    def get_benchmark_max_drawdown(self, prices_data: list, window: int=252):
+        """Calcs the max drawdown for the given benchmark index.
+
+        prices_data -- historical prices for the index
+        window -- the size of the rolling period to use to calc min/max
+        drawdown; note there are 252 trading days in a year, so if you want a
+        window of 2, 3, 4,... years the window will be 504, 756, 1008,... days
+        
+        """
+
+        df = pd.DataFrame(data = prices_data)
+        
+        # calc daily drawdown using the max price over 'window' days
+        rolling_max_price = df['close'].rolling(window=window, min_periods=1).max()
+        daily_drawdown = df['close'] / rolling_max_price - 1.0   # sub 1 to make neg
+
+        # then calc max drawdown as min of daily drawdowns over 'window' days
+        daily_max_drawdown = daily_drawdown.rolling(window, min_periods=1).min()
+        return min(daily_max_drawdown)
+
+    
     def wait_till_next_bar(self, last_bar_timestamp: pd.DatetimeIndex) -> None:
         """Waits the number of seconds till the next bar is released.
 
