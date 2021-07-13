@@ -220,16 +220,17 @@ class StockFrame():
             ))
 
     def _check_current_signals(self, bar, indicators: dict, indicators_comp_key: List[str], indicators_key: List[str], locked_indicators = None):
-        """
-        
-        indicators {dict} -- A dictionary containing all the indicators to be checked
-        along with their buy and sell criteria.
+        """check_signals for use in backtesting; iterates over historical prices
+        instead of only evaluating the most recent bar
 
-        indicators_comp_key List[str] -- A list of the indicators where we are comparing
-        one indicator to another indicator.
+        indicators {dict} -- A dictionary containing all the indicators to be
+        checked along with their buy and sell criteria.
 
-        indicators_key List[str] -- A list of the indicators where we are comparing
-        one indicator to a numerical value.
+        indicators_comp_key List[str] -- A list of the indicators where we are
+        comparing one indicator to another indicator.
+
+        indicators_key List[str] -- A list of the indicators where we are
+        comparing one indicator to a numerical value.
         """
         
         # Grab the current row
@@ -245,7 +246,6 @@ class StockFrame():
             
             # eval each indicator for signal
             for indicator in indicators_key:
-                
                 if locked_indicators and indicator in locked_indicators:
                     continue
                 
@@ -271,11 +271,9 @@ class StockFrame():
                     conditions['buys'] = pd.Series()
                     conditions['sells'] = pd.Series()
 
+                # store all the buys/sells conditions
                 if not condition_1.empty:
-                    buys_conditions.append(condition_1)
-                    # print(f"Conditions['buys'] keys: {conditions['buys'].keys()}")
-                    # print(f'Condition_1 keys: {condition_1.keys()}')
-                    
+                    buys_conditions.append(condition_1)                    
                     # buys_keys = conditions['buys'].keys().append(condition_1.name)
                     # conditions['buys'] = pd.concat([conditions['buys'], condition_1], keys=buys_keys)
                 
@@ -284,22 +282,14 @@ class StockFrame():
                     # sells_keys = conditions['sells'].keys().append(condition_2.name)
                     # conditions['sells'] = pd.concat([conditions['sells'], condition_2], keys=sells_keys)
 
+            # last join all buys signals together and all sells together
             if buys_conditions:
                 conditions['buys'] = pd.concat(buys_conditions)
                 # conditions['buys'] = pd.concat(buys_conditions, keys=[cond.keys() for cond in buys_conditions], axis=1)
-                
-                # print(' ')
-                # print("conditions['buys']:")
-                # print(conditions['buys'])
             
             if sells_conditions:
                 conditions['sells'] = pd.concat(sells_conditions)
                 # conditions['sells'] = pd.concat([conditions['sells'], condition_2], keys=sells_keys)
-                
-                # print(' ')
-                # print("conditions['sells']:")
-                # print(conditions['sells'])
-
 
         # Store the indicators in a list.
         check_indicators = []
@@ -311,7 +301,7 @@ class StockFrame():
 
         if self.do_indicator_exist(column_names=check_indicators):
             for indicator in indicators_comp_key:
-                if indicator in locked_indicators:
+                if locked_indicators and indicator in locked_indicators:
                     continue
                 
                 # Split the indicators.
@@ -358,7 +348,7 @@ class StockFrame():
         return conditions
 
     
-    def _check_signals(self, indicators: dict, indicators_comp_key: List[str], indicators_key: List[str]) -> Union[pd.DataFrame, None]:
+    def _check_signals(self, indicators: dict, indicators_comp_key: List[str], indicators_key: List[str], locked_indicators = None) -> Union[pd.DataFrame, None]:
         """Returns the last row of the StockFrame if conditions are met.
 
         Overview:
@@ -397,6 +387,9 @@ class StockFrame():
         # Check to see if all the columns exist.
         if self.do_indicator_exist(column_names=indicators_key):
             for indicator in indicators_key:
+                if locked_indicators and indicator in locked_indicators:
+                    continue
+
                 column = last_rows[indicator]
 
                 # Grab the Buy & Sell Condition.
@@ -430,7 +423,9 @@ class StockFrame():
         if self.do_indicator_exist(column_names=check_indicators):
 
             for indicator in indicators_comp_key:
-                
+                if locked_indicators and indicator in locked_indicators:
+                    continue
+
                 # Split the indicators.
                 parts = indicator.split('_comp_')
 

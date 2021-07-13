@@ -338,7 +338,6 @@ class PyRobot():
         trade._td_client = self.session
 
         self.trades[trade_id] = trade
-
         return trade
 
     def delete_trade(self, index: int) -> None:
@@ -445,11 +444,6 @@ class PyRobot():
             self.portfolio.positions[symbol]['current_price'] = quotes[symbol]['lastPrice']
 
         return quotes
-
-    # def get_returns(self):
-    #     for symbol in self.portfolio.positions:
-            
-    #         pass
     
     def grab_historical_prices(self, start: datetime=None, end: datetime=None, period_type='day', period=None, frequency: int = 1,
                                frequency_type: str = 'minute', symbols: List[str] = None) -> List[dict]:
@@ -550,7 +544,7 @@ class PyRobot():
         self.historical_prices['aggregated'] = new_prices
         return self.historical_prices
 
-    def get_latest_bar(self) -> List[dict]:
+    def get_latest_bar(self, symbols: List=None) -> List[dict]:
         """Returns the latest bar for each symbol in the portfolio.
 
         Returns:
@@ -579,9 +573,11 @@ class PyRobot():
         end = str(milliseconds_since_epoch(dt_object=end_date))
 
         latest_prices = []
+        if not symbols:
+            symbols = list(self.portfolio.positions.keys())
 
         # Loop through each symbol.
-        for symbol in self.portfolio.positions:
+        for symbol in symbols:
             try:
                 historical_prices_response = self.session.get_price_history(
                     symbol=symbol,

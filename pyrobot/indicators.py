@@ -194,7 +194,7 @@ class Indicators():
         else:
             return False
     
-    def change_in_price(self, column_name: str = 'change_in_price') -> pd.DataFrame:
+    def price_delta(self, column_name: str = 'price_delta') -> pd.DataFrame:
         """Calculates the day-over-day change in close price 
 
         Returns:
@@ -207,13 +207,13 @@ class Indicators():
         
         self._current_indicators[column_name] = {}                             # Add a new indicator to our indicators dict
         self._current_indicators[column_name]['args'] = locals_data            # storing the args to pass to the later func call
-        self._current_indicators[column_name]['func'] = self.change_in_price   # storing the func to call it later using 'args'
+        self._current_indicators[column_name]['func'] = self.price_delta   # storing the func to call it later using 'args'
 
         self._frame[column_name] = self._price_groups['close'].transform(
             lambda x: x.diff()                                                 # finally, calculate the actual change in close price
         )
 
-        self._frame['log_change_in_price'] = self._price_groups['close'].transform(
+        self._frame['log_price_delta'] = self._price_groups['close'].transform(
             lambda x: np.log(x).diff()
         )
         return self._frame
@@ -317,16 +317,16 @@ class Indicators():
         self._current_indicators[column_name]['func'] = self.rsi
 
         # First calculate the Change in Price.
-        if 'change_in_price' not in self._frame.columns:
-            self.change_in_price()
+        if 'price_delta' not in self._frame.columns:
+            self.price_delta()
 
         # Define the up days.
-        self._frame['up_day'] = self._price_groups['change_in_price'].transform(
+        self._frame['up_day'] = self._price_groups['price_delta'].transform(
             lambda x : np.where(x >= 0, x, 0)
         )
 
         # Define the down days.
-        self._frame['down_day'] = self._price_groups['change_in_price'].transform(
+        self._frame['down_day'] = self._price_groups['price_delta'].transform(
             lambda x : np.where(x < 0, x.abs(), 0)
         )
 
@@ -351,7 +351,7 @@ class Indicators():
 
         # Clean up before sending back.
         self._frame.drop(
-            labels=['ewma_up', 'ewma_down', 'down_day', 'up_day', 'change_in_price'],
+            labels=['ewma_up', 'ewma_down', 'down_day', 'up_day', 'price_delta'],
             axis=1,
             inplace=True
         )
@@ -1084,7 +1084,7 @@ class Indicators():
             # Update the function.
             indicator_function(**indicator_argument)
 
-    def check_signals(self) -> Union[pd.DataFrame, None]:
+    def check_signals(self, locked_indicators = None) -> Union[pd.DataFrame, None]:
         """Checks to see if any signals have been generated.
 
         Returns:
