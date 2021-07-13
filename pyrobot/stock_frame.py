@@ -219,7 +219,7 @@ class StockFrame():
                     self._frame.columns)
             ))
 
-    def _check_current_signals(self, bar, indicators: dict, indicators_comp_key: List[str], indicators_key: List[str], locked_indicators: set = None):
+    def _check_current_signals(self, bar, indicators: dict, indicators_comp_key: List[str], indicators_key: List[str], locked_indicators = None):
         """
         
         indicators {dict} -- A dictionary containing all the indicators to be checked
@@ -232,78 +232,75 @@ class StockFrame():
         one indicator to a numerical value.
         """
         
-        # print(f'indicators: {indicators}')
-        # print(f'indicators_key: {indicators_key}')
-        # print()
-        
-        # print(self.do_indicator_exist(column_names=indicators_key))
-        # print()
-
         # Grab the current row
         last_rows = bar
 
         # Define a list of conditions.
         conditions = {}
+        buys_conditions = []
+        sells_conditions = []
 
         # Check to see if all the columns exist.
         if self.do_indicator_exist(column_names=indicators_key):
             
             # eval each indicator for signal
             for indicator in indicators_key:
-                # print(conditions)
-                
                 
                 if locked_indicators and indicator in locked_indicators:
                     continue
                 
+                # grab the indicator for each symbol
                 column = last_rows[indicator]
-                # if isinstance(column, (str, bool, float, int)):
-                #     # column = pd.DataFrame([column])
-                #     column = pd.Series([column])
-
-                # print()
-                # print(f'{indicator}   <-- indicator')
-                # print(f'{column}   <-- column')
-                # print(type(column))
                 
                 # Grab the Buy & Sell Condition.
                 buy_condition_target = indicators[indicator]['buy']
                 sell_condition_target = indicators[indicator]['sell']
-
                 buy_condition_operator = indicators[indicator]['buy_operator']
                 sell_condition_operator = indicators[indicator]['sell_operator']
 
-                condition_1: pd.Series = buy_condition_operator(
-                    column, buy_condition_target
-                )
+                # create series to test the buy/sell conditions across the df groups
+                condition_1: pd.Series = buy_condition_operator(column, buy_condition_target)
+                condition_2: pd.Series = sell_condition_operator(column, sell_condition_target)
                 
-                condition_2: pd.Series = sell_condition_operator(
-                    column, sell_condition_target
-                )
-
+                # drop null values
                 condition_1 = condition_1.where(lambda x: x == True).dropna()
                 condition_2 = condition_2.where(lambda x: x == True).dropna()
 
+                # set the 'buys'/'sells' keys
                 if not conditions:
-                    conditions['buys'] = condition_1
-                    conditions['sells'] = condition_2
+                    conditions['buys'] = pd.Series()
+                    conditions['sells'] = pd.Series()
 
-                else:
-                    if not condition_1.empty:
-                        buys_keys = conditions['buys'].keys().append(condition_1.name)
-                        conditions['buys'] = pd.concat([conditions['buys'], condition_1], keys=buys_keys)
-                    if not condition_2.empty:
-                        sells_keys = conditions['sells'].keys().append(condition_2.name)
-                        conditions['sells'] = pd.concat([conditions['sells'], condition_2], keys=sells_keys)
-
-                # print(condition_1.name)
-                # print(condition_2.name)
+                if not condition_1.empty:
+                    buys_conditions.append(condition_1)
+                    # print(f"Conditions['buys'] keys: {conditions['buys'].keys()}")
+                    # print(f'Condition_1 keys: {condition_1.keys()}')
+                    
+                    # buys_keys = conditions['buys'].keys().append(condition_1.name)
+                    # conditions['buys'] = pd.concat([conditions['buys'], condition_1], keys=buys_keys)
                 
-                # if not condition_1.empty:
-                #     conditions['buys'][indicator] = condition_1
-                # if not condition_2.empty:
-                #     conditions['sells'][indicator] = condition_2
-        
+                if not condition_2.empty:
+                    sells_conditions.append(condition_2)
+                    # sells_keys = conditions['sells'].keys().append(condition_2.name)
+                    # conditions['sells'] = pd.concat([conditions['sells'], condition_2], keys=sells_keys)
+
+            if buys_conditions:
+                conditions['buys'] = pd.concat(buys_conditions)
+                # conditions['buys'] = pd.concat(buys_conditions, keys=[cond.keys() for cond in buys_conditions], axis=1)
+                
+                # print(' ')
+                # print("conditions['buys']:")
+                # print(conditions['buys'])
+            
+            if sells_conditions:
+                conditions['sells'] = pd.concat(sells_conditions)
+                # conditions['sells'] = pd.concat([conditions['sells'], condition_2], keys=sells_keys)
+                
+                # print(' ')
+                # print("conditions['sells']:")
+                # print(conditions['sells'])
+
+
         # Store the indicators in a list.
         check_indicators = []
         

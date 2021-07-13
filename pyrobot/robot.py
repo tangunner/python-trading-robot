@@ -242,7 +242,8 @@ class PyRobot():
 
         return self.portfolio
 
-    def create_trade(self, trade_id: str, enter_or_exit: str, long_or_short: str, order_type: str = 'mkt', price: float = 0.0, stop_limit_price=0.0) -> Trade:
+    def create_trade(self, trade_id: str, enter_or_exit: str, long_or_short: str, order_type: str = 'mkt', 
+                     price: float = 0.0, stop_limit_price = 0.0, tax_lot_method: str = 'fifo') -> Trade:
         """Initalizes a new instance of a Trade Object.
 
         This helps simplify the process of building an order by using pre-built templates that can be
@@ -328,7 +329,8 @@ class PyRobot():
             side=long_or_short,
             enter_or_exit=enter_or_exit,
             price=price,
-            stop_limit_price=stop_limit_price
+            stop_limit_price=stop_limit_price,
+            tax_lot_method=tax_lot_method
         )
 
         # Set the Client.
@@ -807,7 +809,7 @@ class PyRobot():
                             ownership=True
                         )
 
-                    # Set the Execution Flag.
+                    # Set the Execution flag.
                     trades_to_execute[symbol]['has_executed'] = True
                     trade_obj: Trade = trades_to_execute[symbol]['buy']['trade_func']
 
@@ -850,7 +852,7 @@ class PyRobot():
                         order_responses.append(order_response)
 
         if buys.empty and sells.empty:
-            return None
+            return
 
         # Save the response.
         self.save_orders(order_response_dict=order_responses)

@@ -1,6 +1,8 @@
 import numpy as np
 from datetime import datetime, timedelta
 
+import pandas as pd
+
 from pandas import DataFrame
 from typing import Tuple
 from typing import List
@@ -29,6 +31,7 @@ class Portfolio():
         self.total_return = 0.00
         self.profit_loss = 0.00
         self.market_value = 0.00
+        self.total_value = self.cash + self.market_value
         self.invested_capital = 0.00
         self.risk_tolerance = 0.00
         self.account_number = account_number
@@ -165,7 +168,7 @@ class Portfolio():
             position_lot['quantity'] = quantity
             position_lot['purchase_price'] = purchase_price
             position_lot['purchase_date'] = purchase_date
-            position_lot['cost_basis'] = quantity * purchase_price            
+            position_lot['cost_basis'] = quantity * purchase_price
             position_lot['asset_type'] = asset_type
             position_lot['indicator_used'] = indicator_used
             self.position_lots[symbol].append(position_lot)
@@ -177,7 +180,6 @@ class Portfolio():
                 self.positions[symbol]['cost_basis'] / self.positions[symbol]['quantity']
             )
 
-
         else:
             # if security not owned yet, add it to the positions
             self.positions[symbol] = {}
@@ -188,7 +190,7 @@ class Portfolio():
             self.positions[symbol]['cost_basis'] = quantity * purchase_price
             self.positions[symbol]['asset_type'] = asset_type
 
-
+            # ownership_status allows adding a unowned security to the port
             if purchase_date:
                 self.positions[symbol]['ownership_status'] = True
             else:
@@ -207,6 +209,125 @@ class Portfolio():
 
         return self.positions[symbol]
 
+    def reduce_position(self, symbol: str, quantity: int = 0, tax_lot_method: str = 'fifo', 
+                        indicator_used: str = None) -> dict:
+        """Updates a single position for a partial or entire sale."""
+
+        if not self.in_portfolio(symbol) or not self.positions[symbol]['ownership_status']:
+            raise KeyError(f'The symbol {symbol} is not in the portfolio.')
+
+        
+        if quantity == self.positions[symbol]['quantity']:
+            self.remove_position(symbol)
+
+        elif quantity > self.positions[symbol]['quantity']:
+            raise ValueError(f'The quantity {quantity} exceeds the num of shares held.')
+            
+        else:
+            _quantity = quantity
+            
+            # create copy so the original list can be edited
+            _lots = self.position_lots[symbol].copy()
+
+            """(1) First, update the lots values"""
+            
+            # fifo order sells the lots in the same order they were purchased
+            if tax_lot_method == 'fifo':
+                for lot in _lots:
+                    # replace ALL of the lots' indicators; we still want to eval
+                    # all indicators for signals even though we're holding some
+                    # residual SPY shares
+                    lot_idx = self.position_lots[symbol].index(lot)
+                    self.position_lots[symbol][lot_idx]['indicator_used'] = indicator_used
+                    
+                    if quantity > 0:
+                        adj_quant = min(quantity, lot['quantity'])
+                        
+                        # the entire lot is sold
+                        if lot['quantity'] == adj_quant:
+                            self.position_lots[symbol].remove(lot)
+                        
+                        # only part of the lot is sold
+                        else:
+                            self.position_lots[symbol][0]['quantity'] -= adj_quant
+                            self.position_lots[symbol][0]['cost_basis'] = (
+                                self.position_lots[symbol][0]['quantity'] * self.position_lots[symbol][0]['purchase_price']
+                            )
+                        
+                        quantity -= adj_quant
+
+            # sells the lot(s) according to the lot number(s) passed
+            elif tax_lot_method == 'specific_lot':
+                
+                """[specified lot sales WIP - right now sold based on holding
+                period / tax logic, but eventually will be updated to specify
+                the specific lots to sell by identifier]"""
+
+                # grab any LT lots and sort them by purchase price
+                all_LT_lots = [lot['purchase_price'] for lot in _lots if lot['days_held'] > 365]
+                if all_LT_lots:
+                    all_LT_lots.sort(reverse=True)
+                    
+                # sell all of the highest cost LT lots first
+                for lot in all_LT_lots:
+                    lot_idx = self.position_lots[symbol].index(lot)
+                    self.position_lots[symbol][lot_idx]['indicator_used'] = indicator_used
+                    
+                    if quantity > 0:
+                        adj_quant = min(quantity, lot['quantity'])
+
+                        if lot['quantity'] == adj_quant:
+                            self.position_lots[symbol].remove(lot)
+                            quantity -= adj_quant
+                        
+                        else:
+                            self.position_lots[symbol][0]['quantity'] -= adj_quant
+                            quantity -= adj_quant
+                
+                # refresh _lots def to reflect changes in self.position_lots
+                _lots = self.position_lots[symbol].copy()
+                _lots_prices = [lot['purchase_price'] for lot in _lots].sort(reverse=True)
+                
+                for price in _lots_prices:
+                    lot_idx = self.position_lots[symbol].index(lot)
+                    self.position_lots[symbol][lot_idx]['indicator_used'] = indicator_used
+                    
+                    if quantity > 0:
+                        for lot in _lots:
+                            if lot['purchase_price'] == price:
+                                adj_quant = min(quantity, lot['quantity'])
+
+                                if lot['quantity'] == adj_quant:
+                                    self.position_lots[symbol].remove(lot)
+                                    quantity -= adj_quant
+
+                                else:
+                                    self.position_lots[symbol][0]['quantity'] -= adj_quant
+                                    quantity -= adj_quant
+                                    break
+                    else:
+                        break
+            else:
+                raise Exception("ATM reduce_position only implemented for 'fifo' and 'specific_lot' tax lots.")
+
+
+            """(2) Then, total the lots values to get the updated position vals"""
+
+            position_quantity = 0
+            position_cost_basis = 0
+            
+            for lot in self.position_lots[symbol]:
+                position_quantity += lot['quantity']
+                position_cost_basis += lot['cost_basis']
+            
+            assert (self.positions[symbol]['quantity'] - _quantity) == position_quantity
+            
+            self.positions[symbol]['quantity'] = position_quantity
+            self.positions[symbol]['cost_basis'] = position_cost_basis
+            self.positions[symbol]['purchase_price'] = (
+                position_cost_basis / position_quantity
+            )
+
     def check_portfolio_indicators(self, indicator: str=None, symbol: str=None):
         """Returns the set of all indicators currently in use in all
         position_lots in the portfolio. If indicator given, returns True if it
@@ -224,7 +345,6 @@ class Portfolio():
             all_indicators = []
             for ticker, lots in self.position_lots.items():
                 ticker_indicators = [all_indicators.append(lot['indicator_used']) for lot in lots]
-                # all_indicators.append(symbol_indicators)
             indicators = set(all_indicators)
         else:
             indicators = None
@@ -288,14 +408,16 @@ class Portfolio():
             # reformat dict for making into a DF
             for dt in self.performance_tracker:
                 tracker[dt] = {}
+                tracker[dt]['cash'] = self.performance_tracker[dt]['total']['cash']
                 tracker[dt]['market_value'] = self.performance_tracker[dt]['total']['market_value']
+                tracker[dt]['total_value'] = self.performance_tracker[dt]['total']['total_value']
                 tracker[dt]['invested_capital'] = self.performance_tracker[dt]['total']['invested_capital']
                 tracker[dt]['total_profit_or_loss'] = self.performance_tracker[dt]['total']['total_profit_or_loss']
                 tracker[dt]['total_return'] = self.performance_tracker[dt]['total']['total_return']
                     
         return tracker
     
-    def update_metrics(self, current_prices, date=None):
+    def update_metrics(self, current_prices, date=None, cash=0):
         """Updates the returns for each position and the overall portfolio and
         stores them in the performance tracker
         
@@ -307,43 +429,33 @@ class Portfolio():
         if not date:
             date = datetime.today()
 
+        if not cash:
+            cash = self.cash
+        
         # if there are no positions in the portfolio yet
         if current_prices == 0:
 
-            # add placeholders for each 'total' portfolio metric for that date 
+            # add placeholders for each 'total' portfolio metric for that date
             self.performance_tracker[date] = {}
             self.performance_tracker[date]['total'] = {}
-            self.performance_tracker[date]['total']['market_value'] = 1
+            self.performance_tracker[date]['total']['cash'] = cash
+            self.performance_tracker[date]['total']['market_value'] = 0
+            self.performance_tracker[date]['total']['total_value'] = cash + self.performance_tracker[date]['total']['market_value']
             self.performance_tracker[date]['total']['invested_capital'] = 0
             self.performance_tracker[date]['total']['total_profit_or_loss'] = 0
             self.performance_tracker[date]['total']['total_return'] = 0
-            self.performance_tracker[date]['total']['count_profitable_positions'] = 0
-            self.performance_tracker[date]['total']['count_non_profitable_positions'] = 0
-            self.performance_tracker[date]['total']['count_breakeven_positions'] = 0
             
-            # # grab all of the non-null price vals already in the perf tracker
-            # prices = [
-            #     self.performance_tracker[key] for key in self.performance_tracker if self.performance_tracker[key]
-            # ]
+        else:
+            # calc the portfolio values for the timestep
+            portfolio_metrics = self.projected_market_value(
+                current_prices=current_prices, 
+                date=date, 
+                cash=cash
+                )
             
-            # if prices:
-            #     for key in prices[0]:
-            #         self.performance_tracker[date][key] = 1
-            # else:
-            #     self.performance_tracker[date]['market_value'] = 1
-        
-        # # if first call to update_metrics
-        # else:
-        #     self.performance_tracker[date] = {}
-        #     self.performance_tracker[date]['market_value'] = 1
-            return
-        
-        # calc the portfolio values for the timestep
-        portfolio_metrics = self.projected_market_value(current_prices, date)
-        
-        # add the updated values for the timestep to the performance tracker
-        self.performance_tracker[date] = portfolio_metrics
-        return portfolio_metrics
+            # add the updated values for the timestep to the performance tracker
+            self.performance_tracker[date] = portfolio_metrics
+            return portfolio_metrics
 
 
     def total_allocation(self) -> dict:
@@ -556,13 +668,17 @@ class Portfolio():
         KeyError: If the symbol does not exist in the portfolio it will return an error.
         """
 
-        try:
-            self.positions[symbol]['ownership_status'] = self.in_portfolio(symbol) and \
-                                                         self.positions[symbol]['quantity'] != 0
-        except KeyError:
-            raise KeyError(
-                "Can't set ownership status, you either do not have the symbol in your portfolio or no invested shares."
-            )
+        if ownership:
+            self.positions[symbol]['ownership_status'] = ownership
+        
+        else:
+            try:
+                self.positions[symbol]['ownership_status'] = self.in_portfolio(symbol) and \
+                                                            self.positions[symbol]['quantity'] != 0
+            except KeyError:
+                raise KeyError(
+                    "Can't set ownership status, you either do not have the symbol in your portfolio or no invested shares."
+                )
 
     def is_profitable(self, symbol: str, current_price: float) -> bool:
         """Specifies whether a position is profitable.
@@ -607,13 +723,15 @@ class Portfolio():
 
         return purchase_price <= current_price
 
-    def projected_market_value(self, current_prices: dict, date=None) -> dict:
+    def projected_market_value(self, current_prices: dict, date=None, cash=0) -> dict:
         """Returns the Projected market value for all the positions in the portfolio.
 
         Arguments:
         ----
         current_prices {dict} -- A dictionary of current quotes for each of the symbols
             in the portfolio.
+        date {datetime} -- The then-current date of the prices data
+        cash {float} -- The then-current cash balance
 
         Returns:
         ----
@@ -633,109 +751,150 @@ class Portfolio():
         """
 
         projected_value = {}
-        total_value = 0.0
+        market_value = 0.0
         invested_capital = 0.0
-        total_profit_or_loss = 0.0
-
-        position_count_profitable = 0
-        position_count_not_profitable = 0
-        position_count_break_even = 0
 
         if not date:
             date = datetime.today()
 
         for symbol in current_prices:
             if self.in_portfolio(symbol=symbol):
-                projected_value[symbol] = {}
-                current_quantity = self.positions[symbol]['quantity']
-                purchase_price = self.positions[symbol]['purchase_price']
                 
                 try:
                     current_price = current_prices[symbol]['lastPrice']
                 except KeyError:
                     current_price = current_prices[symbol]['close']
-
+                
                 self.positions[symbol]['current_price'] = current_price
 
+                position_quantity = 0
+                position_cost_basis = 0
+                position_market_value = 0
+                
                 for lot in self.position_lots[symbol]:
+                    lot['days_held'] = date - lot['purchase_date']
                     lot['market_value'] = lot['quantity'] * current_price
+                    lot['cost_basis'] = lot['quantity'] * lot['purchase_price']
                     lot['profit_loss'] = lot['market_value'] - lot['cost_basis']
                     lot['total_return'] = round((lot['profit_loss'] / lot['cost_basis']), 4)
                     lot['annualized_return'] = round((lot['profit_loss'] / lot['cost_basis']) * (365 / (date - datetime.strptime(str(lot['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
+                    
+                    # aggregate for total position values
+                    position_quantity += lot['quantity']
+                    position_cost_basis += lot['cost_basis']
+                    position_market_value += lot['market_value']
+
+                self.positions[symbol]['quantity'] = position_quantity
+                self.positions[symbol]['cost_basis'] = position_cost_basis
+                self.positions[symbol]['market_value'] = position_market_value
+                self.positions[symbol]['purchase_price'] = round(position_cost_basis / position_quantity, 4)
+
+                self.positions[symbol]['profit_loss'] = round(
+                    (position_market_value - position_cost_basis), 4)
+                self.positions[symbol]['total_return'] = round(
+                    (position_market_value - position_cost_basis) / position_cost_basis, 4)
+                self.positions[symbol]['annualized_return'] = round(
+                    self.positions[symbol]['total_return'] * (365 / (date - datetime.strptime(
+                        str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
                 
-                projected_value[symbol]['purchase_price'] = purchase_price
-                projected_value[symbol]['current_price'] = current_price
-                projected_value[symbol]['quantity'] = current_quantity
+                projected_value[symbol] = self.positions[symbol].copy()
 
-                # Calculate total market value.
-                projected_value[symbol]['market_value'] = (
-                    current_price * current_quantity
-                )
-
-                # Calculate total invested capital.
-                projected_value[symbol]['invested_capital'] = (
-                    current_quantity * purchase_price
-                )
-
-                projected_value[symbol]['profit_loss'] = ((current_price - purchase_price) * current_quantity)
-                projected_value[symbol]['total_return'] = round(((current_price - purchase_price) / purchase_price), 4)
-                projected_value[symbol]['annualized_return'] = round(((current_price - purchase_price) / purchase_price) * (365 / (date - datetime.strptime(str(self.positions[symbol]['purchase_date']), "%Y-%m-%d %H:%M:%S")).days), 4)
-
-                total_value += projected_value[symbol]['market_value']
-                total_profit_or_loss += projected_value[symbol]['profit_loss']
-                invested_capital += projected_value[symbol]['invested_capital']
-
-                if projected_value[symbol]['profit_loss'] > 0:
-                    position_count_profitable += 1
-                elif projected_value[symbol]['profit_loss'] < 0:
-                    position_count_not_profitable += 1
-                else:
-                    position_count_break_even += 1
+                # aggregate for total portfolio metrics
+                market_value += self.positions[symbol]['market_value']
+                invested_capital += projected_value[symbol]['cost_basis']
 
         projected_value['total'] = {}
+        projected_value['total']['cash'] = cash
         projected_value['total']['positions_count'] = len(self.positions)
-        projected_value['total']['market_value'] = total_value
+        projected_value['total']['market_value'] = market_value
+        projected_value['total']['total_value'] = cash + market_value
         projected_value['total']['invested_capital'] = invested_capital
-        projected_value['total']['total_profit_or_loss'] = total_profit_or_loss
-        projected_value['total']['total_return'] = round((total_profit_or_loss / invested_capital), 4)
-        projected_value['total']['count_profitable_positions'] = position_count_profitable
-        projected_value['total']['count_non_profitable_positions'] = position_count_not_profitable
-        projected_value['total']['count_breakeven_positions'] = position_count_break_even
+        
+        # grab the initial portfolio balance to calc returns
+        initial_bar = self._get_earliest_performance_bar()
+        beginning_balance = initial_bar['total']['total_value'] if initial_bar else cash + market_value
+        
+        projected_value['total']['total_profit_or_loss'] = round((cash + market_value - beginning_balance), 4)
+        projected_value['total']['total_return'] = round((projected_value['total']['total_profit_or_loss'] / beginning_balance), 4)
 
-        self.market_value = total_value
+        self.cash = cash
+        self.market_value = market_value
+        self.total_value = cash + market_value
         self.invested_capital = invested_capital
-        self.profit_loss = total_profit_or_loss
+        self.profit_loss = projected_value['total']['total_profit_or_loss']
         self.total_return = projected_value['total']['total_return']
+        
         return projected_value
 
+    def _get_earliest_performance_bar(self):
+        """Grabs the beginning values in the performance tracker"""
+
+        if not self.performance_tracker:
+            return None
+
+        earliest_date = min(self.performance_tracker.keys())
+        return self.performance_tracker[earliest_date]
+
     def get_portfolio_max_drawdown(self, window: int=252):
-        """Calcs the max drawdown for the given benchmark index.
+        """Calcs the max drawdown for the portfolio. Max DD calc as the max
+        percent decrease in the port's total val (mv + cash) from the highest
+        preceeding total val
 
         window -- the size of the rolling period to use to calc min/max
         drawdown; note there are 252 trading days in a year, so if you want a
         window of 2, 3, 4,... years the window will be 504, 756, 1008,... days
-        
+
         """
 
         if not self.performance_tracker:
             raise AttributeError('Must create performance tracker before calc max drawdown.')
 
         total_performance_tracker = self.get_performance_tracker(totals_only=True)
+        df = pd.DataFrame.from_dict(total_performance_tracker, orient='index')
         
-        df = DataFrame.from_dict(total_performance_tracker, orient='index')
+        # # calc daily max marketval over window days
+        # rolling_max_mv = df['market_value'].rolling(window=window, min_periods=1).max()
+
+        # # calc daily drawdown; subtract 1 to make DD negative
+        # daily_drawdown = df['market_value'] / rolling_max_mv - 1.0
+
+
+        # # calc daily max totalval over window days
+        # rolling_max_tv = df['total_value'].rolling(window=window, min_periods=1).max()
+
+        # # calc daily drawdown; subtract 1 to make DD negative
+        # daily_drawdown = df['total_value'] / rolling_max_tv - 1.0
+
+        # # then calc max drawdown as min of daily drawdowns over 'window' days
+        # daily_max_drawdown = daily_drawdown.rolling(window, min_periods=1).min()
         
-        # calc daily drawdown using the max market val over 'window' days
-        rolling_max_mv = df['market_value'].rolling(window=window, min_periods=1).max()
-        
-        # subtract 1 to make DD negative
-        daily_drawdown = df['market_value'] / rolling_max_mv - 1.0
+
+        # calc daily max totalval over window days
+        df['rolling_max_tv'] = df['total_value'].rolling(window=window, min_periods=1).max()
+
+        # calc daily drawdown; subtract 1 to make DD negative
+        df['daily_drawdown'] = df['total_value'] / df['rolling_max_tv'] - 1.0
 
         # then calc max drawdown as min of daily drawdowns over 'window' days
-        daily_max_drawdown = daily_drawdown.rolling(window, min_periods=1).min()
-        return min(daily_max_drawdown)
+        df['daily_max_drawdown'] = df['daily_drawdown'].rolling(window, min_periods=1).min()
 
-    def get_max_drawdown(self, tracker: dict, keys: str, print_stuff=True):
-        """My original method fo calculating the max drawdown [DELETE?]"""
+
+        # pd.set_option('display.max_rows', 300)
+        print(df.head(500))
+
+        return min(df['daily_max_drawdown'])
+
+    def get_max_drawdown(self, tracker: dict=None, keys=None, print_stuff=True):
+        """My original method fo calculating the max drawdown [DELETE?] -- note
+        that this returns the same val as get_portfolio_max_drawdown (although I
+        think the other func is faster)
+        
+        """
+
+        if not tracker:
+            tracker = self.get_performance_tracker(totals_only=False)
+        if not keys:
+            keys = set([tracker[dt]['total'] for dt in tracker])
 
         display_min_vals = {}
         display_min_val_dates = {}

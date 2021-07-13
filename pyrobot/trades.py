@@ -53,7 +53,7 @@ class Trade():
 
         return obj_dict
 
-    def new_trade(self, trade_id: str, order_type: str, side: str, enter_or_exit: str, price: float = 0.00, stop_limit_price: float = 0.00) -> dict:
+    def new_trade(self, trade_id: str, order_type: str, side: str, enter_or_exit: str, price: float = 0.00, stop_limit_price: float = 0.00, tax_lot_method: str = 'fifo') -> dict:
         """Creates a new Trade object template.
 
         A trade object is a template that can be used to help build complex trades
@@ -98,11 +98,21 @@ class Trade():
             }
         }
 
+        self.tax_lot_methods = {
+            'fifo': 'FIFO',
+            'lifo': 'LIFO',
+            'high_cost': 'HIGH_COST',
+            'low_cost': 'LOW_COST',
+            'avg_cost': 'AVERAGE_COST',
+            'specific_lot': 'SPECIFIC_LOT'
+        }
+        
         self.order = {
             "orderStrategyType": "SINGLE",
             "orderType": self.order_types[order_type],
             "session": "NORMAL",
             "duration": "DAY",
+            "taxLotMethod": self.tax_lot_methods[tax_lot_method],
             "orderLegCollection": [
                 {
                     "instruction": self.order_instructions[enter_or_exit][side],

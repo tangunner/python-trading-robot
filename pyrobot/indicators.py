@@ -193,13 +193,6 @@ class Indicators():
             return True
         else:
             return False
-
-    """For all of the indicators, we use the locals func to get all of the args
-    passed into the func, then del self bc we are storing the args for later use
-    and the self arg shouldn't be passed into future func calls. These future
-    func calls will happen whenever we call the refresh method to update the
-    values of the indicators. Finally after storing the func + args we calculate
-    the indicator col for each symbol group"""
     
     def change_in_price(self, column_name: str = 'change_in_price') -> pd.DataFrame:
         """Calculates the day-over-day change in close price 
@@ -248,43 +241,18 @@ class Indicators():
 
         self._frame['discount_ratio'] = 1 - abs((self._frame['close'] - self._frame['period_max'])) / self._frame['period_max']
         
-        # drop rows that won't have indicator signals
-        idx_names = self._frame[(self._frame['discount_ratio'] > max(discounts)) & (self._frame['discount_ratio'] < 1)].index
-        self._frame.drop(idx_names, inplace=True)
+        # # drop rows that won't have signals (can't drop rows bc skews max DD)
+        # idx_names = self._frame[(self._frame['discount_ratio'] > max(discounts)) & (self._frame['close_to_sma'] < 1)].index
+        # self._frame.drop(idx_names, inplace=True)
 
         for discount in discounts:
-            col = f'discount_ratio_{str(int(discount*100))}'
+            col = f'max_disc_{str(int(discount*100))}'
             self._frame[col] = np.where((self._frame['discount_ratio'] <= discount), 1, -1)
-            # self._frame[col] = np.where((self._frame['discount_ratio'] <= discount) & \
-            #                             (self._frame['discount_ratio'] > (discount - interval)), 1, -1)
 
-        self._frame.dropna(inplace=True)
+        # self._frame.dropna(inplace=True)
         return self._frame
-
-    # def first_discount_return(self, required_return: float, discounts: list, column_name='first_discount_return'):
-    #     """Calcs the % return on the first (highest) discount ratio"""
-        
-    #     locals_data = locals()
-    #     del locals_data['self']
-
-    #     self._current_indicators[column_name] = {}
-    #     self._current_indicators[column_name]['args'] = locals_data
-    #     self._current_indicators[column_name]['func'] = self.first_discount_return
-        
-    #     first_discount = max(discounts)
-    #     first_discount_col = f'discount_ratio_{str(int(first_discount*100))}'
-    #     self._frame['dates_discount_reached'] = np.where((self._frame[first_discount_col] == 1), self._frame.index[1], 0)
-        
-    #     self._frame[column_name] = self._price_groups['close'].transform(
-    #         lambda x: x.pct_change(periods=period)
-    #     )
-        
-        
-    #     col = f'return_on_discount_{str(int(first_discount*100))}'
-    #     self._frame[f'cost_basis_{str(int(first_discount*100))}'] = 
-    #     self._frame[col] = 
     
-    def close_to_avg_ratio(self, period: int, premium: float = 1.20, column_name: str = 'close_to_avg_ratio') -> pd.DataFrame:
+    def sma_premium(self, period: int, premium: float, column_name: str = 'sma_premium') -> pd.DataFrame:
         """Calculates the ratio of current price to the avg close price over the
         period
 
@@ -298,16 +266,17 @@ class Indicators():
 
         self._current_indicators[column_name] = {}
         self._current_indicators[column_name]['args'] = locals_data
-        self._current_indicators[column_name]['func'] = self.close_to_avg_ratio
+        self._current_indicators[column_name]['func'] = self.sma_premium
         
-        self._frame['period_avg'] = self._price_groups['close'].transform(
+        self._frame['sma'] = self._price_groups['close'].transform(
             lambda x: x.rolling(window=period).mean()
         )
 
-        self._frame['close_to_avg_ratio'] = self._frame['close'] / self._frame['period_avg']
-        col = f'close_to_avg_{str(int(premium*100))}'
-        self._frame[col] = np.where(self._frame['close_to_avg_ratio'] >= premium, 1, -1)
-        self._frame.dropna(inplace=True)
+        self._frame['close_to_sma'] = self._frame['close'] / self._frame['sma']
+        col = f'sma_prem_{str(int(premium*100))}'
+        self._frame[col] = np.where(self._frame['close_to_sma'] >= premium, 1, -1)
+        
+        # self._frame.dropna(inplace=True)
         return self._frame
 
     

@@ -220,6 +220,7 @@ df = pd.DataFrame(
 )
 
 price_df = df.set_index(keys=['symbol', 'datetime'])
+
 # print(price_df)
 
 print(price_df.tail(50))
@@ -271,7 +272,7 @@ import random
 
 tmp = pd.DataFrame(np.random.randn(2000,2)/10000, columns=['A','B'])
 tmp['date'] = pd.date_range('2001-01-01',periods=2000)
-tmp['ii'] = range(len(tmp))            
+tmp['ii'] = range(len(tmp))
 
 def gm(ii, df, p):
     x_df = df.iloc[map(int, ii)]
@@ -283,6 +284,11 @@ def gm(ii, df, p):
 #print tmp.head()
 res = pd.rolling_apply(tmp.ii, 50, lambda x: gm(x, tmp, 5))
 print(res)
+
+
+
+# conditions = {}
+# series1 = pd.Series(np.random.randn(2000, 3),
 
 
 

@@ -1,8 +1,6 @@
 import os
 import sys
 
-from numpy.lib import math
-
 currentdir = f"{str(os.getcwd())}\\python-trading-robot"
 parentdir = os.path.dirname(currentdir)
 if currentdir not in sys.path:
@@ -19,13 +17,13 @@ import operator
 import numpy as np
 import pandas as pd
 import logging
+from pprint import pprint
 
 from datetime import datetime, timedelta
 from configparser import ConfigParser
 
 from pyrobot.robot import PyRobot
 from pyrobot.indicators import Indicators
-
 
 logging.basicConfig(filename='backtest.log', encoding='utf-8', level=logging.DEBUG)
 
@@ -37,10 +35,14 @@ REDIRECT_URI = config.get('main', 'REDIRECT_URI')
 CREDENTIALS_PATH = config.get('main', 'JSON_PATH')
 ACCOUNT_NUMBER = config.get('main', 'ACCOUNT_NUMBER')
 
+
 symbol = 'SPY'
 benchmark = 'SPY'
 paper_trading = True
 backtesting = True
+debug_timing = True
+
+start = datetime.now().timestamp() if debug_timing else 0
 
 trading_robot = PyRobot(
     client_id=CLIENT_ID,
@@ -61,26 +63,34 @@ class PaperTradingAccount(object):
         self.useRealCashBal = False
         self.minCashThreshold = 0.20
         self.minCash = self.cash * self.minCashThreshold
+        self.minReturn = 0.20
         self.priceSlippage = 0.01
-        self.txCosts = 0.0
-        self.STCapGainTax = 0.20                  # ST tax = personal tax rate
-        self.LTCapGainTax = 0.15                  # LT tax typically 15%
+        self.txCosts = 0.00
+        self.saleSignalRatio = 0.75
         self.backtestEndDate = datetime.today()
         self.backtestStartDate = datetime.today() - timedelta(365)
-            
+
+        self.STCapGainTax = 0.20                  # ST tax = personal tax rate
+        self.LTCapGainTax = 0.15                  # LT tax typically 15%
+
     def getUpdatedMinCash(self, trading_robot):
+        """Updates the min cash balance"""
+        
         if not trading_robot.portfolio or not trading_robot.portfolio.positions:
             self.minCash = self.cash * self.minCashThreshold
             return self.minCash
-        
-        if trading_robot.regular_market_open():
-            current_prices=trading_robot.grab_current_quotes()
-        else:
+
+        portfolio_mv = trading_robot.portfolio.market_value
+        if not trading_robot.portfolio.market_value:
             current_prices = {}
-            for symbol in trading_robot.portfolio.positions:
-                current_prices[symbol] = [bar for bar in trading_robot.get_latest_bar() if bar['symbol'] == symbol][0]
+            latest_prices = trading_robot.get_latest_bar()
             
-        portfolio_mv = trading_robot.portfolio.projected_market_value(current_prices)['total']['market_value']
+            for symbol in trading_robot.portfolio.positions:
+                current_prices[symbol] = [bar for bar in latest_prices if bar['symbol'] == symbol][0]
+                
+            portfolio_mv = trading_robot.portfolio.projected_market_value(
+                current_prices)['total']['market_value']
+
         self.minCash = (portfolio_mv + self.cash) * self.minCashThreshold
         return self.minCash
 
@@ -114,26 +124,30 @@ trading_robot.portfolio.stock_frame = stock_frame
 indicator_client = Indicators(price_data_frame=stock_frame)
 indicator_client.change_in_price()
 
-# premium = 1.20
-# indicator_client.close_to_avg_ratio(period=30, premium=premium)
+# add the 'sell' indicators
+premium = 1.05
+indicator_client.sma_premium(period=30, premium=premium)
 
-# discount_ratios = np.linspace(0.5, 1.0, num=5, endpoint=False)
+# add the 'buy' indicators
 discount_ratios = [0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30, 0.20]   # 1 - pct discount
 interval = 0.10
 indicator_client.discount_ratio(period=30, discounts=discount_ratios, interval=interval)
 
-# # Add the close price/avg price premium (sell) signal
-# indicator_client.set_indicator_signal(
-#     indicator=f'close_to_avg_{str(int(premium*100))}',
-#     buy=1.01,                      # outside possible vals to restrict buying
-#     sell=1,
-#     condition_buy=operator.eq,
-#     condition_sell=operator.ge
-# )
+# remove rows with nan values
+indicator_client._frame.dropna(inplace=True)
+
+# Add the close price/avg price premium (sell) signal
+indicator_client.set_indicator_signal(
+    indicator=f'sma_prem_{str(int(premium*100))}',
+    buy=1.01,                      # outside possible vals to restrict buying
+    sell=1,
+    condition_buy=operator.eq,
+    condition_sell=operator.ge
+)
 
 # Add each of the discount (buy) signals
 for discount in discount_ratios:
-    col = f'discount_ratio_{str(int(discount*100))}'
+    col = f'max_disc_{str(int(discount*100))}'
     indicator_client.set_indicator_signal(
         indicator=col,
         buy=1,
@@ -149,17 +163,15 @@ enter_spy = trading_robot.create_trade(
     order_type='mkt'
 )
 
-# exit_spy = trading_robot.create_trade(
-#     trade_id='exit_long_spy',
-#     enter_or_exit='exit',
-#     long_or_short='long',
-#     order_type='mkt'
-# )
+exit_spy = trading_robot.create_trade(
+    trade_id='exit_long_spy',
+    enter_or_exit='exit',
+    long_or_short='long',
+    order_type='mkt',
+    tax_lot_method='specific_lot'
+)
 
-# trades_dict = {}
-# for symbol in symbols:
-#     trades_dict[symbol]
-
+# create the trade dict
 trades_dict = {
     symbol: {
         'buy': {
@@ -167,23 +179,27 @@ trades_dict = {
             'trade_id': trading_robot.trades['long_spy'].trade_id
         },
         'sell': {
-            # 'trade_func': trading_robot.trades['exit_long_spy'],
-            # 'trade_id': trading_robot.trades['exit_long_spy'].trade_id
+            'trade_func': trading_robot.trades['exit_long_spy'],
+            'trade_id': trading_robot.trades['exit_long_spy'].trade_id
         }
     }
 }
 
-# pd.set_option('display.max_rows', indicator_client._frame.shape[0]+1)
-# print(indicator_client._frame)
 
-account.getUpdatedMinCash(trading_robot)
+# # display the indicators with signals
+# new_frame = indicator_client._frame.iloc[:, [1, -12, -11, -8, -7, -6, -5]]
+# new_frame2 = new_frame[new_frame.isin([1]).any(axis=1)]
+# pd.set_option('display.max_rows', new_frame2.shape[0]+1)
+# print(new_frame2)
+# print(' ')
+    
+print(f'Elapsed time: {datetime.now().timestamp() - start} secs \n ') if start else print(' ')
+start = datetime.now().timestamp() if debug_timing else 0
 
-
-# iter over all the dates in the historical data
 for idx, bar in indicator_client._frame.groupby(level=1):
     date = bar.index[0][1]
     current_prices = 0
-
+    
     # update and store the portfolio market values
     if trading_robot.portfolio.positions:
         current_prices = {}
@@ -191,120 +207,148 @@ for idx, bar in indicator_client._frame.groupby(level=1):
             current_prices[symbol] = {}
             current_prices[symbol]['close'] = bar['close'].item()
     
-    trading_robot.portfolio.update_metrics(current_prices, date)
+    trading_robot.portfolio.update_metrics(
+        current_prices=current_prices, 
+        date=date, 
+        cash=account.cash
+        )
 
-    # grab the indicators that were used to buy or sell current shares
-    locked_indicators = trading_robot.portfolio.check_portfolio_indicators(symbol=bar.index[0][0])
+    # grab the indicators that are in-use for shares already bought or sold
+    locked_indicators = trading_robot.portfolio.check_portfolio_indicators(
+        symbol=bar.index[0][0])
 
-    if locked_indicators:
-        signals = indicator_client.check_current_signals(bar=bar, locked_indicators=locked_indicators)
-    else:
-        signals = indicator_client.check_current_signals(bar=bar)
+    signals = indicator_client.check_current_signals(
+        bar=bar, 
+        locked_indicators=locked_indicators
+        )
 
-    # # check first for sell signals to free up capital to buy, in case it's needed
-    # if not signals['sells'].empty and trading_robot.portfolio.get_ownership_status(symbol):
-    #     print('--'*50)
-    #     print(signals['sells'])
+    skip_sells_signals = True
+    skip_buys_signals = True
 
-    #     # date = bar.index[0][1]
-    #     # price = bar['close']
-    #     # disc_ratio = bar['discount_ratio']
-    #     # quantity = int(account.lotSizing / price)
-    #     # cost_basis = quantity * price
+    # check first for sell signals to free up capital, in case needed to buy
+    if signals['sells'].notnull().any():
+        if not signals['sells'].empty and trading_robot.portfolio.get_ownership_status(symbol):
+            skip_sells_signals = False
+            print('--'*50)
+            print('Sell Signals:')
+
+            logging.info(f'{date} -- Locked indicators: {locked_indicators}')
+            print(f'{date} -- Locked indicators: {locked_indicators}')
+
+            # grab the first (highest cost) lot purchased
+            first_lot = trading_robot.portfolio.position_lots[symbol][0]
+
+            # skip signal if returns don't hurdle
+            if first_lot['annualized_return'] < account.minReturn or \
+                first_lot['total_return'] < account.minReturn:
+                skip_sells_signals = True
+                logging.info(f'{date} -- {symbol} Skipped Sell Flag: returns < {account.minReturn}')
+                print(f'{date} -- {symbol} Skipped Sell Flag: returns < {account.minReturn}')
+
+            else:
+                price = bar['close'].item()
+                sma_premium = bar['close_to_sma'].item()
+                total_quantity = int(trading_robot.portfolio.positions[symbol]['quantity'])
+                sale_quantity = round(account.saleSignalRatio * total_quantity, 0)
+                
+                # For papertrading, adj sale price to allow for slippage
+                if paper_trading:
+                    slippage = account.priceSlippage * price
+                    price = price - slippage
+                
+                sale_market_value = sale_quantity * price
+                account.cash += sale_market_value
+                account.getUpdatedMinCash(trading_robot)
+
+                # Add an order leg
+                exit_spy.instrument(
+                    symbol=symbol,
+                    quantity=sale_quantity,
+                    asset_type='EQUITY'
+                )
+
+                trading_robot.portfolio.reduce_position(
+                    symbol=symbol,
+                    quantity=sale_quantity,
+                    tax_lot_method='fifo',
+                    indicator_used=signals['sells'].name
+                )
+
+                tot_shrs = trading_robot.portfolio.positions[symbol]['quantity']
+                print(f'{date} -- SELL: {symbol} >> {sale_quantity} @ ${price}')
+                print(f'SMA Premium: {sma_premium} | Total Shares: {tot_shrs} | Avail. Cash: ${account.cash}')
+                print()
+                logging.info(f'{date} -- SELL: {symbol} >> {quantity} @ ${price}')
+                logging.info(f'SMA Premium: {sma_premium} | Total Shares: {tot_shrs} | Avail. Cash: ${account.cash}')
         
-    #     date = bar.index[0][1]
-    #     price = bar['close']
-    #     quantity = int(trading_robot.portfolio.positions[symbol]['quantity'] * 0.75)
-    #     gross_value = quantity * price
-    #     account.cash += gross_value
 
-    #     # Add an Order Leg.
-    #     exit_spy.instrument(
-    #         symbol=symbol,
-    #         quantity=quantity,
-    #         asset_type='EQUITY'
-    #     )
+    if signals['buys'].notnull().any():
+        if not signals['buys'].empty:
+            skip_buys_signals = False
+            print('--'*50)
+            print('Buy Signals:')
 
-    #     trading_robot.portfolio.positions[symbol]['quantity'] -= quantity
-    #     dt = idx[1]
-    #     logging.info(f'SELL: {symbol} >> {quantity} @ ${price} >> {dt}')
-    
-
-    # check if buy signals
-    if not signals['buys'].empty:
-        print('--'*50)
-        print('Buy Signals:')
-        print(signals['buys'])
-        print()
-
-        logging.info(f'{date} -- Locked indicators: {locked_indicators}')
-        print(f'{date} -- Locked indicators: {locked_indicators}')
-        
-        """NOTE: a.item() only takes the first val in the arr; wouldn't work if
-        there were multiple symbols passed"""
-
-        price = bar['close'].item()
-        disc_ratio = bar['discount_ratio'].item()
-        quantity = int(account.lotSizing / price)
-        cost_basis = price * quantity
-
-        # if any securities in the port, update min cash using MV + cash
-        if trading_robot.portfolio.positions:
+            logging.info(f'{date} -- Locked indicators: {locked_indicators}')
+            print(f'{date} -- Locked indicators: {locked_indicators}')
             
-            """NOTE: a.any() updates the quantity/cost basis if any of the vals
-            in the arr are < minCash"""
-            # if ((account.cash - cost_basis) < account.minCash).any():
+            """NOTE: a.item() only takes the first val in the arr; wouldn't work if
+            there were multiple symbols passed"""
+
+            price = bar['close'].item()
+            disc_ratio = bar['discount_ratio'].item()
+            quantity = int(account.lotSizing / price)
+            cost_basis = price * quantity
 
             # adj quantity if cost dips into min cash balance
             if ((account.cash - cost_basis) < account.minCash):
                 quantity = int((account.cash - account.minCash) / price)
-        
-        # do nothing if we can't afford more shares
-        if not quantity:
-            logging.info(f'{date} -- {symbol} Skipped Buy Flag (discount_ratio = {disc_ratio}): cash = ${account.cash}')
-            continue
+            
+            # do nothing if we can't afford more shares
+            if not quantity:
+                logging.info(f'{date} -- {symbol} Skipped Buy Flag (discount_ratio = {disc_ratio}): cash = ${account.cash}')
+                skip_buys_signals = True
+            
+            else:
+                if paper_trading:
+                    slippage = account.priceSlippage * price
+                    price = price + slippage
 
-        # For papertrading, adj purchase price to allow for slippage
-        if paper_trading:
-            slippage = account.priceSlippage * price
-            price = price + slippage
+                cost_basis = price * quantity
+                account.cash -= cost_basis
+                account.getUpdatedMinCash(trading_robot)
+                
+                # Add order leg
+                enter_spy.instrument(
+                    symbol=symbol,
+                    quantity=quantity,
+                    asset_type='EQUITY'
+                )
 
-        cost_basis = price * quantity
-        account.cash -= cost_basis
-        
-        # Add order leg
-        enter_spy.instrument(
-            symbol=symbol,
-            quantity=quantity,
-            asset_type='EQUITY'
-        )
+                """NOTE: This may need to be moved to after execute_signals for the actual
+                program; should only add the position to the portfolio once the trade
+                response indicates the status is executed"""
 
-        """NOTE: This needs to be moved to after execute_signals for the actual
-        program; should only add the position to the portfolio once the trade
-        response indicates the status is executed"""
+                # Add the new position to the portfolio
+                trading_robot.portfolio.add_position(
+                    symbol=symbol, 
+                    asset_type='equity', 
+                    purchase_date=date, 
+                    quantity=quantity, 
+                    purchase_price=price,
+                    indicator_used=signals['buys'].name
+                )
+                
+                tot_shrs = trading_robot.portfolio.positions[symbol]['quantity']
+                print(f'{date} -- BUY: {symbol} >> {quantity} @ ${price}')
+                print(f'Discount Ratio: {disc_ratio} | Total Shares: {tot_shrs} | Avail. Cash: ${account.cash}')
+                print()
+                logging.info(f'{date} -- BUY: {symbol} >> {quantity} @ ${price}')
+                logging.info(f'Discount Ratio: {disc_ratio} | Total Shares: {tot_shrs} | Avail. Cash: ${account.cash}')
 
-        # Add the new position to the portfolio
-        trading_robot.portfolio.add_position(
-            symbol=symbol, 
-            asset_type='equity', 
-            purchase_date=date, 
-            quantity=quantity, 
-            purchase_price=price,
-            indicator_used=signals['buys'].name
-        )
-        
-        tot_shrs = trading_robot.portfolio.positions[symbol]['quantity']
-        print(f'{date} -- BUY: {symbol} >> {quantity} @ ${price}')
-        print(f'Discount Ratio: {disc_ratio} | Total Shares: {tot_shrs} | Avail. Cash: ${account.cash}')
-        logging.info(f'{date} -- BUY: {symbol} >> {quantity} @ ${price}')
-        logging.info(f'Discount Ratio: {disc_ratio} | Total Shares: {tot_shrs} | Avail. Cash: ${account.cash}')
-
-    else:
-        # logging.info(f'{bar.index[0][1]} -- No signals')
-        # print(f'{bar.index[0][1]} -- No signals')
+    if skip_sells_signals and skip_buys_signals:
         continue
 
-    # Execute Trades.
+    # Execute Trades
     trading_robot.execute_signals(
         signals=signals,
         trades_to_execute=trades_dict
@@ -313,38 +357,45 @@ for idx, bar in indicator_client._frame.groupby(level=1):
     logging.info(f'Signals executed.')
 
 
+print(f'Elapsed time: {datetime.now().timestamp() - start} secs \n ') if start else print(' ')
+start = datetime.now().timestamp() if debug_timing else 0
+
+
 """
-Calculate Strategy's Returns
+----------------------------------------------
+Calculate Strategy & Benchmark Metrics/Returns
+----------------------------------------------
+
 """
 
-market_open_flag = trading_robot.regular_market_open
 
-if market_open_flag:
+if trading_robot.regular_market_open:
     current_prices = trading_robot.grab_current_quotes()
+    date = datetime.today()
+
+# if market closed, use last close price as current price
 else:
-    # if market closed, use last close price as current price
     current_prices = {}
+    
     try:
         for symbol in trading_robot.portfolio.positions:
             current_prices[symbol] = {}
             current_prices[symbol]['close'] = trading_robot.portfolio.positions[symbol]['current_price']
+    
     except KeyError:
         last_prices = trading_robot.get_latest_bar()
         for symbol in trading_robot.portfolio.positions:
             current_prices[symbol] = {}
             current_prices[symbol]['close'] = [
-                p['close'] for p in last_prices if p['symbol'] == symbol
-            ][0]
+                p['close'] for p in last_prices if p['symbol'] == symbol][0]
 
-# add the current prices to the portfolio performance tracker
-trading_robot.portfolio.update_metrics(current_prices, date)
-
-# # calc the portfolio max drawdown
-# max_drawdown = trading_robot.portfolio.get_max_drawdown(
-#     tracker=tracker, keys=['total_profit_or_loss', 'market_value', 'total_return'], print_stuff=False
-# )
-
-max_drawdown = trading_robot.portfolio.get_portfolio_max_drawdown(window=252)
+# add current prices to the port tracker and calc port max drawdown
+trading_robot.portfolio.update_metrics(
+    current_prices=current_prices, 
+    date=date, 
+    cash=account.cash
+    )
+portfolio_max_drawdown = trading_robot.portfolio.get_portfolio_max_drawdown(window=252)
 
 # grab historical prices for the benchmark and calc its max drawdown
 benchmark_historical_prices = trading_robot.grab_historical_prices(
@@ -355,22 +406,24 @@ benchmark_historical_prices = trading_robot.grab_historical_prices(
     symbols=[benchmark]
 )
 benchmark_max_drawdown = trading_robot.get_benchmark_max_drawdown(
-    prices_data=benchmark_historical_prices['aggregated'], window=252
-)
+    prices_data=benchmark_historical_prices['aggregated'], window=252)
 
-print(f'max_drawdown: {max_drawdown}')
+print(f'portfolio_max_drawdown: {portfolio_max_drawdown}')
 print(f'benchmark_max_drawdown: {benchmark_max_drawdown}')
+
+print(f'Elapsed time: {datetime.now().timestamp() - start} secs \n ') if start else print(' ')
 
 logging.info('--'*50)
 logging.info(f'STRATEGY RETURNS')
 logging.info(f'Market Value: {trading_robot.portfolio.market_value}')
 logging.info(f'Invested Capital: {trading_robot.portfolio.invested_capital}')
 logging.info(f'Profit Loss: {trading_robot.portfolio.profit_loss}')
-logging.info(f'Max Drawdown: {max_drawdown}')
+logging.info(f'Max Drawdown: {portfolio_max_drawdown}')
 logging.info(f'Total Return: {trading_robot.portfolio.total_return}')
 ann_return = round(trading_robot.portfolio.total_return * (365 / timedelta(milliseconds=(account.backtestEndDate - account.backtestStartDate)).days), 4)
 logging.info(f'Annualized Return: {ann_return}')
 logging.info(' ')
+
 logging.info(f'BENCHMARK ({symbol}) RETURNS')
 spy_tot_return = round(((historical_prices['aggregated'][-1]['close'] - historical_prices['aggregated'][0]['close']) / historical_prices['aggregated'][0]['close']), 4)
 spy_ann_return = round(spy_tot_return * (365 / timedelta(milliseconds=(account.backtestEndDate - account.backtestStartDate)).days), 4)

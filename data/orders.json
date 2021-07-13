@@ -1,15 +1,16 @@
 [
     {
-        "order_id": "SPY_long_enter_1625781888.873041",
+        "order_id": "SPY_long_exit_1626184954.610195",
         "request_body": {
             "orderStrategyType": "SINGLE",
             "orderType": "MARKET",
             "session": "NORMAL",
             "duration": "DAY",
+            "taxLotMethod": "SPECIFIC_LOT",
             "orderLegCollection": [
                 {
-                    "instruction": "BUY",
-                    "quantity": 43,
+                    "instruction": "SELL",
+                    "quantity": 87.0,
                     "instrument": {
                         "symbol": "SPY",
                         "assetType": "EQUITY"
@@ -17,6 +18,6 @@
                 }
             ]
         },
-        "timestamp": "2021-07-08T18:04:48.873041"
+        "timestamp": "2021-07-13T10:02:34.610195"
     }
 ]
