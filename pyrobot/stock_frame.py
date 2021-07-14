@@ -488,11 +488,10 @@ class StockFrame():
         # Filter the Stock Frame.
         bars_filtered = self._frame.filter(like=symbol, axis=0)
         bars = bars_filtered.tail(1)
-
         return bars
 
     def grab_n_bars_ago(self, symbol: str, n: int) -> pd.Series:
-        """Grabs the current trading bar.
+        """Grabs the trading bar shifted n periods.
 
         ### Parameters
         ----------
@@ -513,5 +512,4 @@ class StockFrame():
         # Filter the Stock Frame.
         bars_filtered = self._frame.filter(like=symbol, axis=0)
         bars = bars_filtered.iloc[-n]
-
         return bars

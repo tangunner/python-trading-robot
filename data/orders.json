@@ -1,12 +1,12 @@
 [
     {
-        "order_id": "SPY_long_exit_1626184954.610195",
+        "order_id": "SPY_long_exit_1626220737.717364",
         "request_body": {
             "orderStrategyType": "SINGLE",
             "orderType": "MARKET",
             "session": "NORMAL",
             "duration": "DAY",
-            "taxLotMethod": "SPECIFIC_LOT",
+            "taxLotMethod": "FIFO",
             "orderLegCollection": [
                 {
                     "instruction": "SELL",
@@ -18,6 +18,6 @@
                 }
             ]
         },
-        "timestamp": "2021-07-13T10:02:34.610195"
+        "timestamp": "2021-07-13T19:58:57.717364"
     }
 ]

@@ -1,9 +1,6 @@
 import os
 import sys
 
-from pandas.core.frame import DataFrame
-from pandas.core.groupby.generic import DataFrameGroupBy
-
 currentdir = f"{str(os.getcwd())}\\python-trading-robot"
 parentdir = os.path.dirname(currentdir)
 if currentdir not in sys.path:
@@ -20,7 +17,6 @@ import operator
 import numpy as np
 import pandas as pd
 import logging
-from pprint import pprint
 
 from datetime import datetime, timedelta
 from configparser import ConfigParser
@@ -42,7 +38,7 @@ ACCOUNT_NUMBER = config.get('main', 'ACCOUNT_NUMBER')
 symbol = 'SPY'
 benchmark = 'SPY'
 paper_trading = True
-backtesting = False
+backtesting = True
 debug_timing = False
 
 start = datetime.now().timestamp() if debug_timing else 0
@@ -198,7 +194,7 @@ exit_spy = trading_robot.create_trade(
     enter_or_exit='exit',
     long_or_short='long',
     order_type='mkt',
-    tax_lot_method='specific_lot'
+    tax_lot_method='fifo'      # TBU for specific_lot or high cost
 )
 
 # create the trade dict
@@ -217,7 +213,8 @@ trades_dict = {
 
 
 # # display the indicators with signals
-# new_frame = indicator_client._frame.iloc[:, [1, -12, -11, -8, -7, -6, -5]]
+# new_frame = indicator_client._frame.filter(regex='^[a-z]+_[a-z]+_\d', axis=1)
+# new_frame1 = indicator_client._frame.iloc[:, [1, -12, -11, -8, -7, -6, -5]]
 # new_frame2 = new_frame[new_frame.isin([1]).any(axis=1)]
 # pd.set_option('display.max_rows', new_frame2.shape[0]+1)
 # print(new_frame2)
@@ -260,7 +257,6 @@ if backtesting:
             )
 
         skip_sells_signals = True
-        skip_buys_signals = True
 
         # check first for sell signals to free up capital, in case needed to buy
         if signals['sells'].notnull().any():
@@ -318,7 +314,8 @@ if backtesting:
                     logging.info(f'{date} -- SELL: {symbol} >> {quantity} @ ${price}')
                     logging.info(f'SMA Premium: {sma_premium} | Total Shares: {tot_shrs} | Avail. Cash: ${account.cash}')
             
-
+        skip_buys_signals = True
+        
         if signals['buys'].notnull().any():
             if not signals['buys'].empty:
                 skip_buys_signals = False
